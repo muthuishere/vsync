@@ -30,7 +30,7 @@ tasks:
 
       Reads ./envconfig.<lowercase-name>.json (gitignored) from the directory
       you run task in (typically infra/setup) and prints the export line to
-      paste into your shell rc / 1Password.
+      paste into your shell rc (~/.zshrc on macOS).
 
       Example:
         task -t infra/setup/Taskfile.yml init-env NAME=LOCAL

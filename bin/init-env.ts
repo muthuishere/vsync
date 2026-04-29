@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 // Usage: init-env <NAME> [path-to-json] [--prefix=PREFIX]
 //
-// Reads a JSON config file (default: <scripts-dir>/envconfig.<lowercase-name>.json)
+// Reads a JSON config file (default: ./envconfig.<lowercase-name>.json in cwd)
 // matching the shape in envconfig.sample.json, validates it, gzip+base64-encodes
 // it, and prints the `export <PREFIX>_<NAME>='...'` line ready to paste into
-// your shell rc / 1Password.
+// your shell rc.
 //
 // PREFIX defaults to $SECRETS_SYNC_PREFIX or SECRETS_ENV.
 
@@ -92,7 +92,7 @@ export async function main(argv: string[]): Promise<void> {
   console.log("3. First-time push (uploads your local .env + vault folder to the bucket):\n");
   console.log(`   secret-lib push-env ${name}${prefix ? ` --prefix=${prefix}` : ""}\n`);
   console.log("⚠️  The export line contains your S3 credentials and encryption key.");
-  console.log("   Store it in 1Password / Bitwarden — never commit it.");
+  console.log("   Keep it out of version control and treat it like any other secret.");
   console.log(`⚠️  ${configPath} is gitignored, but it contains plaintext secrets.`);
   console.log("   Delete it after you've saved the export line, or keep it out of");
   console.log("   backups, cloud sync, and screen-shares.\n");

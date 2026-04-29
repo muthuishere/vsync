@@ -1,20 +1,20 @@
 # Using — daily flow once your project is set up
 
-This is the **teammate** path: someone has already onboarded the project (see [`onboarding.md`](./onboarding.md)) and saved the export line in 1Password. You just want the secrets on your machine.
+This is the **teammate** path: someone has already onboarded the project (see [`onboarding.md`](./onboarding.md)) and shared the export line with you. You just want the secrets on your machine.
 
 ## First-time setup on your machine
 
-### 1. Get the export line from 1Password
+### 1. Get the export line from your team
 
-Ask your team / open 1Password. You're looking for an entry like:
+The project owner sends you a single line that looks like:
 
 ```
-VIDEO_AI_ENV_PRODUCTION
+export VIDEO_AI_ENV_PRODUCTION='H4sIA...long-blob...'
 ```
 
-Its value will be a long string starting with something like `H4sIA…` (gzip+base64). Copy the whole `export …` line.
+Substitute the actual variable name your project uses (e.g. `REQSUME_ENV_DEV`, `MYAPP_ENV_LOCAL`). The value is a long gzip+base64 string.
 
-### 2. Paste into `~/.zshrc` (or `~/.bashrc`)
+### 2. Paste into `~/.zshrc` (macOS) or `~/.bashrc`
 
 Open `~/.zshrc` in your editor and paste at the end:
 
@@ -101,7 +101,7 @@ The lib keeps the **2 most recent** backups per env. If you've pulled three time
 If your project has `LOCAL`, `DEV`, `PRODUCTION`, etc.:
 
 ```bash
-# Each env has its own export line in 1Password and its own zshrc entry:
+# Each env has its own export line and its own zshrc entry:
 export VIDEO_AI_ENV_LOCAL='...'
 export VIDEO_AI_ENV_DEV='...'
 export VIDEO_AI_ENV_PRODUCTION='...'
@@ -118,7 +118,7 @@ task -t infra/setup/Taskfile.yml prod:pull
 |---|---|---|
 | `VIDEO_AI_ENV_PRODUCTION is not set` | Forgot to source after pasting | `source ~/.zshrc` or open a new tab |
 | `pointer is empty — push-env first to seed the bucket` | No one has done the initial push for that env | Ask the project owner to run `task prod:push` |
-| `pointer claims X but bundle was sealed as Y — refusing` | `latest` points at a tampered/renamed bundle (or your key is mismatched) | Get the current export line from 1Password — yours may be stale after a rotation |
+| `pointer claims X but bundle was sealed as Y — refusing` | `latest` points at a tampered/renamed bundle (or your key is mismatched) | Ask the project owner for the current export line — yours may be stale after a rotation |
 | `decrypt failed / OperationError` | Your encryption key doesn't match what the bundle was encrypted with | Same as above — your export line is stale |
 | `bunx github:muthuishere/secret-lib …` fails to install | Network / GitHub auth | Check `gh auth status`; for public repos no auth needed but `bun` must be on PATH |
 

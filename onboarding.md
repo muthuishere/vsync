@@ -129,11 +129,12 @@ You'll see:
    export VIDEO_AI_ENV_PRODUCTION='<long-base64-blob>'
 ```
 
-### 6. Save the export line in three places
+### 6. Save the export line in two places
 
-1. **Your `~/.zshrc` (or `~/.bashrc`):** so this machine has it.
-2. **1Password / Bitwarden / your team secret manager:** so teammates can grab it.
-3. **Source your shell:** `source ~/.zshrc` or open a new tab.
+1. **Your `~/.zshrc` (macOS) or `~/.bashrc`:** so this machine has it.
+2. **Somewhere your team can pick it up:** whatever channel you use to share secrets (encrypted chat, password manager, internal note, etc.). Send teammates the full `export VIDEO_AI_ENV_PRODUCTION='...'` line.
+
+Then **source your shell:** `source ~/.zshrc` or open a new tab.
 
 ### 7. First push — seed S3 with the initial bundle
 
@@ -173,7 +174,7 @@ You should now see `.env.production` and `infra/vault/production/` in `/tmp/test
 
 ### 10. Share with the team
 
-Send teammates one thing: the **export line** from Step 5. They paste it into their `~/.zshrc`, run `task prod:pull`, and they're done. See [`using.md`](./using.md).
+Send teammates one thing: the **export line** from Step 5. Use whatever secret-sharing channel your team uses. They paste it into their `~/.zshrc`, run `task prod:pull`, and they're done. See [`using.md`](./using.md).
 
 ## Repeat for other envs
 
@@ -187,7 +188,7 @@ When you want to rotate (compromised key, employee left, etc.):
 
 1. Edit `infra/setup/envconfig.production.json`, generate a new `encryption.key` + `salt` with `openssl rand`.
 2. `task init-env NAME=PRODUCTION` → new export line.
-3. Update your `~/.zshrc`, 1Password, and `source`.
+3. Update your `~/.zshrc`, re-share the new export line with the team, and `source`.
 4. `task prod:push` to seed S3 with a bundle encrypted under the new key.
 5. Coordinate with the team — they all need the new export line. Old bundles in S3 stay there but become unreadable.
 

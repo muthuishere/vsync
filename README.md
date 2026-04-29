@@ -7,7 +7,7 @@ Standalone Bun CLI. Designed for `bunx github:muthuishere/secret-lib …` from a
 ## Start here
 
 - **Setting up a new project?** → [`onboarding.md`](./onboarding.md) — provision an env-var, push the first bundle, share with the team.
-- **Joining an existing project?** → [`using.md`](./using.md) — get the key from 1Password, paste into `~/.zshrc`, pull.
+- **Joining an existing project?** → [`using.md`](./using.md) — paste the export line your team shared into `~/.zshrc`, source, pull.
 - **Want a copy-paste Taskfile?** → [`examples/Taskfile.yml`](./examples/Taskfile.yml) — drop into `infra/setup/Taskfile.yml`, change the prefix, done.
 
 ## Install
@@ -42,7 +42,7 @@ VIDEO_AI_ENV_LOCAL = ...    # video-ai's Taskfile passes --prefix=VIDEO_AI_ENV
 REQSUME_ENV_LOCAL  = ...    # reqsume's Taskfile passes --prefix=REQSUME_ENV
 ```
 
-`init-env` reads a JSON config file and prints that string. Once you have it in your shell rc (or 1Password), `push-env` uploads your local `.env` + vault folder to the bucket (encrypted, versioned, manifest-sealed), and `pull-env` downloads the latest, verifies the manifest, replaces local files.
+`init-env` reads a JSON config file and prints that string. Once you have it in your shell rc, `push-env` uploads your local `.env` + vault folder to the bucket (encrypted, versioned, manifest-sealed), and `pull-env` downloads the latest, verifies the manifest, replaces local files.
 
 ## CLI
 
@@ -83,7 +83,7 @@ Or pass the flag explicitly:
 
 ### `init-env <NAME> [path-to-json] [--prefix=PREFIX]`
 
-Reads a JSON config file (default: `envconfig.<lowercase-name>.json` in current dir), validates it, prints the `export <PREFIX>_<NAME>='...'` line ready to paste into your shell rc / 1Password.
+Reads a JSON config file (default: `envconfig.<lowercase-name>.json` in current dir), validates it, prints the `export <PREFIX>_<NAME>='...'` line ready to paste into your shell rc (`~/.zshrc` on macOS).
 
 ```bash
 cp envconfig.sample.json envconfig.local.json
