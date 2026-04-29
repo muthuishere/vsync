@@ -1,0 +1,99 @@
+version: '3'
+
+# Example Taskfile.yml for a consuming repo. Copy this to your repo
+# (typically into infra/setup/Taskfile.yml) and:
+#
+#   1. Change SECRETS_SYNC_PREFIX to your project's prefix.
+#      e.g. VIDEO_AI_ENV → env var becomes VIDEO_AI_ENV_<NAME>
+#           REQSUME_ENV  → env var becomes REQSUME_ENV_<NAME>
+#
+#   2. Keep this Taskfile WITHOUT a top-level `dotenv:` declaration —
+#      the env-sync tasks read <PREFIX>_<NAME> directly from your shell,
+#      so this Taskfile must work before any `.env` exists in the repo.
+#
+# Run from anywhere:
+#   task -t infra/setup/Taskfile.yml init-env NAME=LOCAL
+#   task -t infra/setup/Taskfile.yml local:pull
+
+env:
+  SECRETS_SYNC_PREFIX: PROJECT_ENV    # ← change this
+
+vars:
+  SECRET_LIB: bunx github:muthuishere/secret-lib
+
+tasks:
+  init-env:
+    desc: 'Encode envconfig.<lowercase-name>.json into the <PREFIX>_<NAME> export line (var NAME=...)'
+    summary: |
+      Required variables:
+        NAME — UPPER_SNAKE_CASE name (LOCAL, DEV, STAGING, ...)
+
+      Reads ./envconfig.<lowercase-name>.json (gitignored) from the directory
+      you run task in (typically infra/setup) and prints the export line to
+      paste into your shell rc / 1Password.
+
+      Example:
+        task -t infra/setup/Taskfile.yml init-env NAME=LOCAL
+    preconditions:
+      - sh: '[ -n "{{.NAME}}" ]'
+        msg: 'NAME is required (e.g. NAME=LOCAL)'
+    cmds:
+      - '{{.SECRET_LIB}} init-env {{.NAME}}'
+
+  push-env:
+    desc: 'Encrypt + upload local .env + vault folder to S3 (var NAME=...)'
+    preconditions:
+      - sh: '[ -n "{{.NAME}}" ]'
+        msg: 'NAME is required (e.g. NAME=LOCAL)'
+    cmds:
+      - '{{.SECRET_LIB}} push-env {{.NAME}}'
+
+  pull-env:
+    desc: 'Backup, then download + decrypt latest from S3 (var NAME=...). Keeps last 2 backups in ~/.config/localdevconfig/'
+    preconditions:
+      - sh: '[ -n "{{.NAME}}" ]'
+        msg: 'NAME is required (e.g. NAME=LOCAL)'
+    cmds:
+      - '{{.SECRET_LIB}} pull-env {{.NAME}}'
+
+  # Per-env shortcuts — wrap the parameterized push/pull above.
+  local:pull:
+    desc: 'Pull LOCAL env from S3 (alias for pull-env NAME=LOCAL)'
+    cmds: [{ task: pull-env, vars: { NAME: LOCAL } }]
+  local:push:
+    desc: 'Push LOCAL env to S3 (alias for push-env NAME=LOCAL)'
+    cmds: [{ task: push-env, vars: { NAME: LOCAL } }]
+
+  dev:pull:
+    desc: 'Pull DEV env from S3 (alias for pull-env NAME=DEV)'
+    cmds: [{ task: pull-env, vars: { NAME: DEV } }]
+  dev:push:
+    desc: 'Push DEV env to S3 (alias for push-env NAME=DEV)'
+    cmds: [{ task: push-env, vars: { NAME: DEV } }]
+
+  ci:pull:
+    desc: 'Pull CI env from S3 (alias for pull-env NAME=CI)'
+    cmds: [{ task: pull-env, vars: { NAME: CI } }]
+  ci:push:
+    desc: 'Push CI env to S3 (alias for push-env NAME=CI)'
+    cmds: [{ task: push-env, vars: { NAME: CI } }]
+
+  prod:pull:
+    desc: 'Pull PRODUCTION env from S3 (alias for pull-env NAME=PRODUCTION)'
+    cmds: [{ task: pull-env, vars: { NAME: PRODUCTION } }]
+  prod:push:
+    desc: 'Push PRODUCTION env to S3 (alias for push-env NAME=PRODUCTION)'
+    cmds: [{ task: push-env, vars: { NAME: PRODUCTION } }]
+
+  status:
+    desc: Check that the setup tools are installed
+    cmds:
+      - |
+        echo "🔍 Setup-tool status:"
+        for tool in git bun bunx; do
+          if command -v $tool &> /dev/null; then
+            echo "✅ $tool: $($tool --version 2>&1 | head -1)"
+          else
+            echo "❌ $tool: Not installed"
+          fi
+        done

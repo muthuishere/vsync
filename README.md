@@ -4,6 +4,12 @@ Encrypted env-sync for repos. Bundles a `.env` file + a vault folder, encrypts w
 
 Standalone Bun CLI. Designed for `bunx github:muthuishere/secret-lib …` from any consuming repo.
 
+## Start here
+
+- **Setting up a new project?** → [`onboarding.md`](./onboarding.md) — provision an env-var, push the first bundle, share with the team.
+- **Joining an existing project?** → [`using.md`](./using.md) — get the key from 1Password, paste into `~/.zshrc`, pull.
+- **Want a copy-paste Taskfile?** → [`examples/Taskfile.yml`](./examples/Taskfile.yml) — drop into `infra/setup/Taskfile.yml`, change the prefix, done.
+
 ## Install
 
 You don't. Just run via `bunx`:
