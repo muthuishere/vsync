@@ -23,8 +23,8 @@ export async function main(argv: string[]): Promise<void> {
     console.error("usage: init-env <NAME> [path-to-json] [--prefix=PREFIX]");
     console.error("");
     console.error("  NAME           UPPER_SNAKE_CASE (e.g. LOCAL, DEV, PRODUCTION)");
-    console.error("  path-to-json   optional; defaults to envconfig.<lowercase-name>.json");
-    console.error("                 next to scripts/. See envconfig.sample.json for shape.");
+    console.error("  path-to-json   optional; defaults to ./envconfig.<lowercase-name>.json");
+    console.error("                 in the current working directory.");
     console.error("  --prefix=      optional; falls back to $SECRETS_SYNC_PREFIX or SECRETS_ENV");
     process.exit(1);
   }
@@ -37,16 +37,15 @@ export async function main(argv: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const scriptsDir = resolve(import.meta.dir, "..");
-  const defaultPath = join(scriptsDir, `envconfig.${name.toLowerCase()}.json`);
+  const cwd = process.cwd();
+  const defaultPath = join(cwd, `envconfig.${name.toLowerCase()}.json`);
   const configPath = customPath ? resolve(customPath) : defaultPath;
 
   if (!existsSync(configPath)) {
-    const samplePath = join(scriptsDir, "envconfig.sample.json");
     console.error(`config file not found: ${configPath}`);
     console.error("");
-    console.error("Copy the sample to that path and fill in real values:");
-    console.error(`  cp ${samplePath} ${configPath}`);
+    console.error("Create that file (gitignored) with values matching envconfig.sample.json,");
+    console.error("then re-run this command from the same directory.");
     console.error("");
     console.error("(envconfig.*.json is gitignored — only envconfig.sample.json is committed.)");
     process.exit(1);
