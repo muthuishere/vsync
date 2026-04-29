@@ -53,6 +53,7 @@ secret-lib <subcommand> [args...]
   push-env        <NAME> [--prefix=PREFIX]
   pull-env        <NAME> [--prefix=PREFIX]
   restore-backup  <NAME> <backup-file> <target-dir> [--prefix=PREFIX]
+  sync-secrets    <ENV> <gh|gcp>
 ```
 
 `PREFIX` resolution order:
@@ -108,6 +109,25 @@ Encrypts the existing local `.env` + vault folder into `~/.config/localdevconfig
 
 Decrypts a `~/.config/localdevconfig/<name>-<ts>.zip.enc` file using the same key+salt and unzips into `<target-dir>`. Use after a pull overwrites local edits.
 
+### `sync-secrets <ENV> <gh|gcp>`
+
+Reads `<repo-root>/.env.<ENV>` and fans out each variable to the chosen backend in parallel (6 workers, 10-min overall timeout). Routing config lives inside the `.env.<ENV>` file itself and is consumed (not pushed):
+
+- `gh`: requires `GITHUB_REPO=owner/repo`. The GitHub environment name is the literal `<ENV>` arg. Shells out to `gh secret set`.
+- `gcp`: requires `GCP_PROJECT_ID=...`. Secret names are flat — the project provides isolation across environments. Shells out to `gcloud secrets describe` / `versions add` / `create`.
+
+Special-case keys (matching the Go reference impl in reqsume):
+
+- `GITHUB_TOKEN`, `GOOGLE_APPLICATION_CREDENTIALS` → skipped (local-only)
+- `GCP_SA_KEY_FILE_PATH=<path>` → file is read, pushed as `GCP_SA_KEY` (must look like JSON)
+- `SSH_KEY_PATH=<path>` → file is read, pushed as `SSH_PRIVATE_KEY`
+- single pair of surrounding `"` / `'` is stripped from values
+- `#` comments and blank lines are skipped
+
+Failures don't abort the run — each failed key is logged and listed in the summary; exit code is 0 with warnings.
+
+System deps: `gh` for the gh target, `gcloud` for the gcp target.
+
 ## Config schema
 
 See `envconfig.sample.json` for an example.
@@ -156,7 +176,7 @@ envconfig.sample.json   committed sample config (placeholders)
 bun test
 ```
 
-7 files, 63 tests. Covers `argv` (positional + flag parsing), `codec` (round-trip + error paths), `crypto` (round-trip, wrong key/salt, magic, IV randomness, NUL bytes), `manifest` (wrap/unwrap, magic, length, NUL bytes), `archive` (real-fs zip → unzip), `envconfig` (encode/decode, validation including length floors, prefix resolution, env-var parsing), and `backup` (encrypted roundtrip, wrong-key rejection, rolling 2-deep, name-scoped pruning).
+8 files, 74 tests. Covers `argv` (positional + flag parsing), `codec` (round-trip + error paths), `crypto` (round-trip, wrong key/salt, magic, IV randomness, NUL bytes), `manifest` (wrap/unwrap, magic, length, NUL bytes), `archive` (real-fs zip → unzip), `envconfig` (encode/decode, validation including length floors, prefix resolution, env-var parsing), `backup` (encrypted roundtrip, wrong-key rejection, rolling 2-deep, name-scoped pruning), and `envfile` (.env parsing, special-case keys, routing-key extraction, missing files).
 
 The S3 client wrapper is intentionally not unit-tested — exercise it end-to-end via `init-env` → `push-env` → `pull-env` against a real bucket on first setup.
 

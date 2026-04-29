@@ -6,10 +6,17 @@
 //   secret-lib push-env <NAME> [--prefix=PREFIX]
 //   secret-lib pull-env <NAME> [--prefix=PREFIX]
 //   secret-lib restore-backup <NAME> <backup-file> <target-dir> [--prefix=PREFIX]
+//   secret-lib sync-secrets <ENV> <gh|gcp>
 //
 // Designed for `bunx github:muthuishere/secret-lib <subcommand> ...`.
 
-const SUBCOMMANDS = ["init-env", "push-env", "pull-env", "restore-backup"] as const;
+const SUBCOMMANDS = [
+  "init-env",
+  "push-env",
+  "pull-env",
+  "restore-backup",
+  "sync-secrets",
+] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 function usage(code = 0): never {
@@ -21,6 +28,7 @@ function usage(code = 0): never {
   out("  push-env <NAME> [--prefix=PREFIX]");
   out("  pull-env <NAME> [--prefix=PREFIX]");
   out("  restore-backup <NAME> <backup-file> <target-dir> [--prefix=PREFIX]");
+  out("  sync-secrets <ENV> <gh|gcp>");
   out("");
   out("PREFIX defaults to $SECRETS_SYNC_PREFIX or SECRETS_ENV.");
   process.exit(code);
@@ -54,6 +62,11 @@ switch (subcommand as Subcommand) {
   }
   case "restore-backup": {
     const { main } = await import("./restore-backup");
+    await main(subArgv);
+    break;
+  }
+  case "sync-secrets": {
+    const { main } = await import("./sync-secrets");
     await main(subArgv);
     break;
   }
