@@ -1,0 +1,18 @@
+{
+  "s3": {
+    "endpoint": "hel1.your-objectstorage.com",
+    "bucket": "videoaienv",
+    "region": "us-east-1",
+    "useSsl": true,
+    "accessKeyId": "<paste>",
+    "secretAccessKey": "<paste>"
+  },
+  "encryption": {
+    "key": "<long-passphrase>",
+    "salt": "<deployment-specific-salt>"
+  },
+  "files": {
+    "envFile": ".env",
+    "vaultFolder": "infra/vault/local"
+  }
+}

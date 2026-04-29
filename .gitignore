@@ -1,0 +1,7 @@
+node_modules/
+*.log
+
+# Real env-config JSON files contain plaintext secrets — never committed.
+# Only the placeholder sample is committed.
+envconfig.*.json
+!envconfig.sample.json
