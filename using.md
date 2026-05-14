@@ -1,134 +1,81 @@
-# Using — daily flow once your project is set up
+# Using — joining an existing project
 
-This is the **teammate** path: someone has already onboarded the project (see [`onboarding.md`](./onboarding.md)) and shared the export line with you. You just want the secrets on your machine.
+A teammate sent you a `.share` file (and a passphrase, on a different channel). Here's how to install it.
 
-## First-time setup on your machine
+## Prerequisites
 
-### 1. Get the export line from your team
+- [Bun](https://bun.sh) 1.2.21+ (for `Bun.secrets`).
+- The repo cloned locally.
+- The `.share` file your teammate sent.
+- The passphrase your teammate sent (separately).
 
-The project owner sends you a single line that looks like:
-
-```
-export VIDEO_AI_ENV_PRODUCTION='H4sIA...long-blob...'
-```
-
-Substitute the actual variable name your project uses (e.g. `REQSUME_ENV_DEV`, `MYAPP_ENV_LOCAL`). The value is a long gzip+base64 string.
-
-### 2. Paste into `~/.zshrc` (macOS) or `~/.bashrc`
-
-Open `~/.zshrc` in your editor and paste at the end:
+## 1. Install the share file
 
 ```bash
-# video-ai production secrets — secret-lib
-export VIDEO_AI_ENV_PRODUCTION='H4sIA...long-blob...'
+cd <repo>
+bunx @muthuishere/secret-lib import dev ./reqsume-dev.share
+# Passphrase: xK4p-pNm9-Qr2t
 ```
 
-Substitute the actual prefix and env name your project uses (e.g. `REQSUME_ENV_DEV`, `MYAPP_ENV_LOCAL`).
+Done. The CLI:
 
-### 3. Source your shell
+1. Reads the file
+2. Decrypts with the passphrase
+3. Writes the config to `~/.config/deemwar/config/<repo>/env_dev` (chmod 0600)
+4. Writes the encryption key to your OS keychain (`com.deemwar.secret-lib` / `<repo>/dev`)
+
+You can delete the `.share` file now — its contents are installed.
+
+For non-interactive scripting:
 
 ```bash
-source ~/.zshrc
+bunx @muthuishere/secret-lib import dev ./reqsume-dev.share --passphrase=xK4p-pNm9-Qr2t
 ```
 
-…or just open a new terminal tab.
-
-### 4. Pull the secrets into your repo
-
-From your repo root:
+## 2. Pull the encrypted bundle
 
 ```bash
-task -t infra/setup/Taskfile.yml prod:pull
+bunx @muthuishere/secret-lib pull dev
 ```
 
-You should see:
+Downloads `s3://<bucket>/dev/latest` → decrypts → unzips into the repo root, replacing `.env.dev` + `infra/vault/dev/`.
 
-```
-[1/6] backing up local files (if any)
-      (no local files yet, skipping)
-[2/6] reading pointer s3://...
-[3/6] downloading version 20260429-073751
-[4/6] decrypting
-[5/6] verifying manifest ts
-[6/6] unzipping into /your/repo
-✅ pulled version 20260429-073751
-```
+Existing local files are automatically backed up to `~/.config/localdevconfig/dev-<ts>.zip.enc` before being overwritten. Two-deep rolling buffer.
 
-`.env.production` and the vault folder are now on disk. Done.
-
-## Day-to-day
-
-### Pulling latest from a teammate's push
-
-Whenever someone updates a credential and pushes, you pull:
+## 3. Daily flow
 
 ```bash
-task -t infra/setup/Taskfile.yml prod:pull
-```
-
-Your existing local `.env.production` + vault folder get encrypted-backed-up to `~/.config/localdevconfig/<env>-<ts>.zip.enc` (rolling 2 most recent) before being overwritten. So an accidental clobber is recoverable.
-
-### Pushing a credential change
-
-You edited `.env.production` (rotated an API key, added a new one). Push so the team picks it up:
-
-```bash
-task -t infra/setup/Taskfile.yml prod:push
-```
-
-This uploads a new versioned bundle. Old versions stay in S3 — if your push was a mistake, the team can pull whatever the previous `latest` pointed at by manually setting the pointer back, but in practice it's easier to just `prod:push` again with the corrected files.
-
-## Recovering from an overwrite
-
-If `prod:pull` clobbered local edits you wanted to keep:
-
-```bash
-ls ~/.config/localdevconfig/production-*.zip.enc
-# pick a backup file from the list
-
-SECRETS_SYNC_PREFIX=VIDEO_AI_ENV bunx github:muthuishere/secret-lib \
-  restore-backup PRODUCTION \
-  ~/.config/localdevconfig/production-20260429-103045.zip.enc \
-  /tmp/recovered
-
-# inspect /tmp/recovered/, copy what you need back into the repo
-```
-
-The lib keeps the **2 most recent** backups per env. If you've pulled three times in a row, the original is gone.
-
-## Multiple environments
-
-If your project has `LOCAL`, `DEV`, `PRODUCTION`, etc.:
-
-```bash
-# Each env has its own export line and its own zshrc entry:
-export VIDEO_AI_ENV_LOCAL='...'
-export VIDEO_AI_ENV_DEV='...'
-export VIDEO_AI_ENV_PRODUCTION='...'
-
-# Pull whichever you're working with:
-task -t infra/setup/Taskfile.yml local:pull
+# Get the latest from S3:
 task -t infra/setup/Taskfile.yml dev:pull
-task -t infra/setup/Taskfile.yml prod:pull
+
+# Push your local edits:
+task -t infra/setup/Taskfile.yml dev:push
 ```
+
+## Inspecting your local state
+
+```bash
+bunx @muthuishere/secret-lib show-key dev --yes   # print the key (confirm intent)
+ls -la ~/.config/deemwar/config/<repo>/          # see config files on disk
+```
+
+## Removing local state
+
+```bash
+bunx @muthuishere/secret-lib delete-key dev --yes # remove key from OS keychain
+rm ~/.config/deemwar/config/<repo>/env_dev       # remove config file
+```
+
+Re-install at any time with another `import`.
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| `VIDEO_AI_ENV_PRODUCTION is not set` | Forgot to source after pasting | `source ~/.zshrc` or open a new tab |
-| `pointer is empty — push-env first to seed the bucket` | No one has done the initial push for that env | Ask the project owner to run `task prod:push` |
-| `pointer claims X but bundle was sealed as Y — refusing` | `latest` points at a tampered/renamed bundle (or your key is mismatched) | Ask the project owner for the current export line — yours may be stale after a rotation |
-| `decrypt failed / OperationError` | Your encryption key doesn't match what the bundle was encrypted with | Same as above — your export line is stale |
-| `bunx github:muthuishere/secret-lib …` fails to install | Network / GitHub auth | Check `gh auth status`; for public repos no auth needed but `bun` must be on PATH |
+**"no config file for <repo>/<env>"** — you haven't imported (or initialised) this env yet. Get a `.share` from a teammate and run `import`.
 
-## Library version
+**"encryption key for <repo>/<env> not found in OS keychain"** — the file exists but the key isn't in your keychain. Either:
+- Re-run `import` with the `.share` (it carries both).
+- If you only have the key (not the file), run `secret-lib link <env> --key=<key>`.
 
-This repo's Taskfile typically tracks `main` (no version pin). To pin to a tag:
+**"failed to decrypt share file — passphrase wrong or file corrupt"** — double-check the passphrase. If it still fails, ask the sender to re-export and re-share both.
 
-```yaml
-vars:
-  SECRET_LIB: bunx github:muthuishere/secret-lib#v0.1.1
-```
-
-See [releases](https://github.com/muthuishere/secret-lib/releases).
+**"pointer claims X but bundle was sealed as Y"** during `pull` — defensive check failed. Someone with bucket write access pointed `latest` at a renamed older bundle, but the embedded manifest timestamp doesn't match. Refuse + report to ops.

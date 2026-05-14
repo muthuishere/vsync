@@ -1,17 +1,46 @@
 {
   "name": "@muthuishere/secret-lib",
-  "version": "0.1.0",
-  "description": "Encrypted env-sync for repos: zip + AES-GCM + S3 + manifest-sealed versioning. Run via bunx.",
+  "version": "0.2.0",
+  "description": "Encrypted env-sync CLI for repos. File-based config + OS keychain for the encryption key + AES-GCM-on-S3 for the bundle. Bun-native, run via bunx.",
   "type": "module",
   "bin": {
     "secret-lib": "./bin/secret-lib.ts"
   },
+  "files": [
+    "bin",
+    "src",
+    "examples",
+    "README.md",
+    "onboarding.md",
+    "using.md"
+  ],
   "scripts": {
     "test": "bun test"
   },
+  "keywords": [
+    "secrets",
+    "env",
+    "dotenv",
+    "vault",
+    "s3",
+    "keychain",
+    "encryption",
+    "bun",
+    "cli"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/muthuishere/secret-lib.git"
+  },
+  "homepage": "https://github.com/muthuishere/secret-lib#readme",
+  "bugs": {
+    "url": "https://github.com/muthuishere/secret-lib/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "bun": ">=1.2.21"
   },
   "license": "MIT",
   "devDependencies": {
