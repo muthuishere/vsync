@@ -1,73 +1,113 @@
-// EnvConfig is the JSON shape that lives inside the gzip+base64 string
-// stored as <PREFIX>_<NAME>. The whole config — bucket creds + encryption
-// key/salt + which files to sync — travels in one env var so a fresh
-// machine only needs to set that single variable.
+// envconfig.ts — the in-memory shape used by push-env / pull-env and the
+// glue that combines two on-disk sources into it:
 //
-// The prefix is supplied by the caller (CLI flag or env var) so the same
-// library serves multiple repos:
-//   video-ai uses --prefix=VIDEO_AI_ENV → VIDEO_AI_ENV_<NAME>
-//   reqsume  uses --prefix=REQSUME_ENV  → REQSUME_ENV_<NAME>
+//   1. `~/.config/deemwar/config/<repo>/env_<env>` — bucket creds + salt
+//      + file paths, gzipped JSON, chmod 0600. See configfile.ts.
+//   2. OS keychain (macOS Keychain / Linux libsecret / Windows Credential
+//      Manager) — the AES encryption key. See keychain.ts.
 //
-// Resolution order:
-//   1. explicit `prefix` arg (e.g. CLI --prefix=)
-//   2. SECRETS_SYNC_PREFIX env var
-//   3. FALLBACK_PREFIX ("SECRETS_ENV")
+// `loadEnvConfig(repo, env)` reads both and returns the combined config.
+// Missing file → returns null. Missing key → throws a "key not found"
+// error so push/pull can surface it cleanly.
+//
+// Export/import blob:
+//   `buildExportBlob` zips config+key+metadata into a single string the
+//   user can share with teammates. `parseExportBlob` is the inverse.
+//   Both go through codec.ts for gzip+base64 framing.
 
 import type { S3Credentials } from "./s3";
 import { encodeGzipBase64, decodeGzipBase64 } from "./codec";
+import type { ConfigFile } from "./configfile";
+import { loadConfigFile, validateConfigFile } from "./configfile";
+import { getKey } from "./keychain";
 
 export const MIN_KEY_LEN = 20;
 export const MIN_SALT_LEN = 16;
-export const FALLBACK_PREFIX = "SECRETS_ENV";
+export const EXPORT_BLOB_VERSION = 1;
 
+/**
+ * Runtime composite used by every push/pull code path. Identical shape
+ * to the old env-var blob, but assembled from file + keychain.
+ */
 export type EnvConfig = {
   s3: S3Credentials;
   encryption: { key: string; salt: string };
   files: { envFile: string; vaultFolder: string };
 };
 
-export function resolvePrefix(prefix?: string): string {
-  const p = prefix || process.env.SECRETS_SYNC_PREFIX || FALLBACK_PREFIX;
-  if (!/^[A-Z][A-Z0-9_]*$/.test(p)) {
-    throw new Error(
-      `prefix must be UPPER_SNAKE_CASE (got "${p}"). e.g. VIDEO_AI_ENV, REQSUME_ENV`,
+/** Wire shape of the share blob exchanged between teammates. */
+export type ExportPayload = {
+  version: number;
+  repo: string;
+  env: string;
+  config: ConfigFile; // file contents (no key)
+  key: string; // base64-encoded AES key
+};
+
+export class ConfigFileMissingError extends Error {
+  constructor(repo: string, env: string, filePath: string) {
+    super(
+      `no config file for ${repo}/${env} at ${filePath}.\n` +
+        `Run 'secret-lib init ${env} --repo=${repo}' to create one, or 'secret-lib import ${env} <share-file>' if a teammate sent you one.`,
     );
+    this.name = "ConfigFileMissingError";
   }
-  return p;
 }
 
-export function envVarName(name: string, prefix?: string): string {
-  if (!/^[A-Z][A-Z0-9_]*$/.test(name)) {
-    throw new Error(
-      `name must be UPPER_SNAKE_CASE (got "${name}"). e.g. LOCAL, DEV, STAGING`,
+export class KeyMissingError extends Error {
+  constructor(repo: string, env: string) {
+    super(
+      `encryption key for ${repo}/${env} not found in OS keychain.\n` +
+        `Run 'secret-lib import ${env} <share-file>' if a teammate sent you the share file (it carries the key),\n` +
+        `or 'secret-lib link ${env} --key=<key>' if you only have the key,\n` +
+        `or 'secret-lib init ${env} --repo=${repo}' to generate a brand new one.`,
     );
+    this.name = "KeyMissingError";
   }
-  return `${resolvePrefix(prefix)}_${name}`;
 }
 
-export function loadFromEnv(name: string, prefix?: string): EnvConfig {
-  const varName = envVarName(name, prefix);
-  const v = process.env[varName];
-  if (!v) {
-    throw new Error(
-      `${varName} is not set. Run 'init-env ${name}' to generate it.`,
-    );
+/**
+ * Load and assemble the full EnvConfig for a (repo, env). Throws
+ * ConfigFileMissingError if the on-disk file is absent, KeyMissingError
+ * if the file exists but the keychain entry is gone.
+ */
+export async function loadEnvConfig(
+  repo: string,
+  env: string,
+): Promise<EnvConfig> {
+  const { configFilePath } = await import("./configfile");
+  const cfg = await loadConfigFile(repo, env);
+  if (!cfg) {
+    throw new ConfigFileMissingError(repo, env, configFilePath(repo, env));
   }
-  return decode(v);
+  const key = await getKey(repo, env);
+  if (!key) {
+    throw new KeyMissingError(repo, env);
+  }
+  const composite: EnvConfig = {
+    s3: cfg.s3,
+    encryption: { key, salt: cfg.encryption.salt },
+    files: cfg.files,
+  };
+  validate(composite);
+  return composite;
 }
 
-export function encode(cfg: EnvConfig): string {
-  validate(cfg);
-  return encodeGzipBase64(JSON.stringify(cfg));
+/** Build a share-blob string (the inverse of parseExportBlob). */
+export function buildExportBlob(payload: ExportPayload): string {
+  validateExportPayload(payload);
+  return encodeGzipBase64(JSON.stringify(payload));
 }
 
-export function decode(blob: string): EnvConfig {
-  const json = decodeGzipBase64(blob);
+/** Parse a share-blob string. Throws on bad gzip / JSON / shape. */
+export function parseExportBlob(blob: string): ExportPayload {
+  const json = decodeGzipBase64(blob.trim());
   const parsed = JSON.parse(json);
-  validate(parsed);
+  validateExportPayload(parsed);
   return parsed;
 }
 
+/** Validate a runtime composite EnvConfig (key included). */
 export function validate(cfg: unknown): asserts cfg is EnvConfig {
   const c = cfg as Partial<EnvConfig> | null;
   const s3 = c?.s3;
@@ -89,16 +129,34 @@ export function validate(cfg: unknown): asserts cfg is EnvConfig {
   }
   if (typeof enc.key !== "string" || enc.key.length < MIN_KEY_LEN) {
     throw new Error(
-      `encryption.key must be at least ${MIN_KEY_LEN} characters (got ${enc.key?.length ?? 0}). Use a long passphrase or a generated random string.`,
+      `encryption.key must be at least ${MIN_KEY_LEN} characters (got ${enc.key?.length ?? 0}).`,
     );
   }
   if (typeof enc.salt !== "string" || enc.salt.length < MIN_SALT_LEN) {
     throw new Error(
-      `encryption.salt must be at least ${MIN_SALT_LEN} characters (got ${enc.salt?.length ?? 0}). Use a deployment-specific random string.`,
+      `encryption.salt must be at least ${MIN_SALT_LEN} characters (got ${enc.salt?.length ?? 0}).`,
     );
   }
   const files = c?.files;
   for (const k of ["envFile", "vaultFolder"] as const) {
     if (!files?.[k]) throw new Error(`files.${k} missing`);
   }
+}
+
+function validateExportPayload(p: unknown): asserts p is ExportPayload {
+  const x = p as Partial<ExportPayload> | null;
+  if (!x || typeof x !== "object") throw new Error("export blob is not an object");
+  if (x.version !== EXPORT_BLOB_VERSION) {
+    throw new Error(
+      `unsupported export blob version: ${x.version} (this CLI handles ${EXPORT_BLOB_VERSION})`,
+    );
+  }
+  if (!x.repo || typeof x.repo !== "string") throw new Error("export blob: repo missing");
+  if (!x.env || typeof x.env !== "string") throw new Error("export blob: env missing");
+  if (!x.key || typeof x.key !== "string" || x.key.length < MIN_KEY_LEN) {
+    throw new Error(
+      `export blob: key missing or shorter than ${MIN_KEY_LEN} chars`,
+    );
+  }
+  validateConfigFile(x.config);
 }

@@ -1,200 +1,121 @@
-# Onboarding — wire `secret-lib` into a new project
+# Onboarding — setting up a new project
 
-This is the **project-owner** path: you have a repo with a `.env.<env>` file (and optionally a vault folder of binary secrets like Firebase service-account JSON, TLS certs, etc.) and you want your team to share those secrets via S3 instead of by hand.
-
-By the end of this guide, your team will be able to:
-
-```bash
-export VIDEO_AI_ENV_PRODUCTION='<from-1password>'
-task -t infra/setup/Taskfile.yml prod:pull
-```
-
-…and have the right `.env.production` + vault folder show up locally. See [`using.md`](./using.md) for the teammate-facing flow.
-
----
+You're the first person on the project. You'll create the (repo, env) config, generate an encryption key, push your first bundle to S3, and hand the team a share file.
 
 ## Prerequisites
 
-- An S3-compatible bucket you control (Hetzner Object Storage, AWS S3, Cloudflare R2, MinIO — anything with an S3 API).
-- `bun`, `bunx`, `git` on your machine.
-- A `Taskfile.yml`-driven project (we use [Task](https://taskfile.dev) — install once with `brew install go-task`).
+- [Bun](https://bun.sh) 1.2.21+ (for `Bun.secrets`)
+- An S3-compatible bucket: AWS S3, Backblaze B2, Cloudflare R2, MinIO, etc. — any service that speaks the S3 API. Note the endpoint, region, bucket name, and a key/secret pair scoped to that bucket.
+- Optional: `task` (go-task) if you want the `infra/setup/Taskfile.yml` shortcuts.
 
-## Step-by-step
+## 1. Scaffold the repo layout
 
-### 1. Pick a prefix
-
-Each consuming repo gets a unique env-var prefix so multiple projects coexist. Conventions:
-
-| Project | Prefix | Env var |
-|---|---|---|
-| `video-ai` | `VIDEO_AI_ENV` | `VIDEO_AI_ENV_PRODUCTION` |
-| `reqsume` | `REQSUME_ENV` | `REQSUME_ENV_PRODUCTION` |
-
-Pick one. UPPER_SNAKE_CASE, must start with a letter. Replace `<PREFIX>` in the rest of this guide.
-
-### 2. Add the example Taskfile to your repo
-
-Copy `examples/Taskfile.yml` from this repo into your project at `infra/setup/Taskfile.yml`:
+In an empty (or existing) repo:
 
 ```bash
-mkdir -p infra/setup
-curl -fsSL https://raw.githubusercontent.com/muthuishere/secret-lib/main/examples/Taskfile.yml \
-  -o infra/setup/Taskfile.yml
+bunx @muthuishere/secret-lib initapp
 ```
 
-Edit one line — change `SECRETS_SYNC_PREFIX: PROJECT_ENV` to your prefix:
+This generates:
 
-```yaml
-env:
-  SECRETS_SYNC_PREFIX: VIDEO_AI_ENV    # ← your prefix here
+```
+.env / .env.dev / .env.production    # gitignored stubs
+.env.sample                          # committed shape
+infra/vault/{local,dev,production}/.gitkeep
+infra/setup/Taskfile.yml             # per-env shortcuts
+.gitignore                           # additions appended if missing
 ```
 
-### 3. Update your repo's `.gitignore`
+Edit the stubs with real values. The whole point of the tool is to share these via S3 — you put real secrets in them locally, push, and your team pulls.
 
-Add three blocks (adjust to match the env names you actually use):
+Pass `--envs=dev,production` to skip the prompt, `--force` to overwrite existing files, `--no-taskfile` to skip the Taskfile generation.
 
-```gitignore
-# secret-lib config files — plaintext S3 creds + encryption key, never committed.
-infra/setup/envconfig.*.json
-
-# Real env files (templates can be committed; concrete .env files are NOT)
-.env
-.env.dev
-.env.production
-.env.local
-
-# Infra vault — secrets on disk only, never committed
-infra/vault/local/
-infra/vault/dev/
-infra/vault/production/
-```
-
-### 4. Create your env-config file
-
-Pick the env you're setting up first (e.g. `PRODUCTION`). The config file lives next to your Taskfile.
+## 2. Initialize a (repo, env) — generates the AES key
 
 ```bash
-cd infra/setup
-curl -fsSL https://raw.githubusercontent.com/muthuishere/secret-lib/main/envconfig.sample.json \
-  -o envconfig.production.json
+bunx @muthuishere/secret-lib init dev
 ```
 
-Open `envconfig.production.json` and fill in real values:
+Prompts for (or accepts via flags):
 
-```json
-{
-  "s3": {
-    "endpoint": "hel1.your-objectstorage.com",
-    "bucket": "myprojectsecrets",
-    "region": "us-east-1",
-    "useSsl": true,
-    "accessKeyId": "...",
-    "secretAccessKey": "..."
-  },
-  "encryption": {
-    "key": "long-random-passphrase",
-    "salt": "deployment-specific-salt"
-  },
-  "files": {
-    "envFile": ".env.production",
-    "vaultFolder": "infra/vault/production"
-  }
-}
-```
+- S3 endpoint, region, bucket, access key ID, secret access key
+- Env file path (default `.env.dev`)
+- Vault folder path (default `infra/vault/dev`)
 
-**Generate strong key + salt** (don't pick a passphrase by hand):
+Flag-driven equivalent for scripting:
 
 ```bash
-openssl rand -hex 32     # → encryption.key (64 chars)
-openssl rand -hex 16     # → encryption.salt (32 chars)
+bunx @muthuishere/secret-lib init dev \
+  --endpoint=https://hel1.your-objectstorage.com \
+  --region=hel1 \
+  --bucket=my-secrets-bucket \
+  --access-key=AKIAxxxxxxx \
+  --secret-key=xxxxxxxxxxxxxxxx \
+  --env-file=.env.dev \
+  --vault-folder=infra/vault/dev
 ```
 
-Validation floor: `key` ≥ 20 chars, `salt` ≥ 16 chars. The library refuses anything shorter.
+At the end you'll see:
 
-### 5. Generate the export string
+```
+✅ Setup complete
+  config file: /Users/you/.config/deemwar/config/<repo>/env_dev  (0600)
+  key:         OS keychain (service=com.deemwar.secret-lib, account=<repo>/dev)
+```
 
-From `infra/setup/`:
+The key is now in your OS keychain. Never printed unless you ask (`show-key`).
+
+## 3. Push your first bundle
 
 ```bash
-task init-env NAME=PRODUCTION
+bunx @muthuishere/secret-lib push dev
 ```
 
-You'll see:
+What happens:
 
-```
-✅ Encoded.
+1. Zips the configured env file + vault folder
+2. Seals the zip in a manifest with a timestamp
+3. AES-256-GCM encrypts with the key (derived from your keychain key + the salt in the config file)
+4. Uploads to `s3://<bucket>/dev/versions/<ts>.enc`
+5. Updates the `s3://<bucket>/dev/latest` pointer to that timestamp
 
-1. Add this line to your shell rc (~/.zshrc or ~/.bashrc):
+Teammates run `pull` to fetch the latest. The manifest pointer prevents anyone with bucket-write but no key from silently rolling back the bundle.
 
-   export VIDEO_AI_ENV_PRODUCTION='<long-base64-blob>'
-```
-
-### 6. Save the export line in two places
-
-1. **Your `~/.zshrc` (macOS) or `~/.bashrc`:** so this machine has it.
-2. **Somewhere your team can pick it up:** whatever channel you use to share secrets (encrypted chat, password manager, internal note, etc.). Send teammates the full `export VIDEO_AI_ENV_PRODUCTION='...'` line.
-
-Then **source your shell:** `source ~/.zshrc` or open a new tab.
-
-### 7. First push — seed S3 with the initial bundle
-
-Make sure your `.env.production` and `infra/vault/production/` (or whatever the config points to) exist locally with real values.
+## 4. Share with the team
 
 ```bash
-task -t infra/setup/Taskfile.yml prod:push
+bunx @muthuishere/secret-lib export dev
 ```
 
-You should see:
+This produces:
 
-```
-[1/5] zipping .env.production + infra/vault/production/
-[2/5] sealing manifest ts=20260429-073751
-[3/5] encrypting
-[4/5] uploading 13616 bytes → s3://myprojectsecrets/production/versions/20260429-073751.enc
-[5/5] updating pointer → s3://myprojectsecrets/production/latest
-✅ pushed (version: 20260429-073751)
-```
+- `./<repo>-dev.share` — a passphrase-encrypted file containing config + key + metadata
+- A printed passphrase (e.g. `xK4p-pNm9-Qr2t`)
 
-### 8. Verify with a fresh-clone test
+**Send these on different channels.** File via Slack DM, passphrase via SMS. Or 1Password attachment + 1Password field. Whatever you trust.
 
-In another folder, clone the repo and try the using flow:
+Teammates run:
 
 ```bash
-git clone <your-repo-url> /tmp/test-clone
-cd /tmp/test-clone
-export VIDEO_AI_ENV_PRODUCTION='<the-export-line-from-step-5>'
-task -t infra/setup/Taskfile.yml prod:pull
+bunx @muthuishere/secret-lib import dev <repo>-dev.share
 ```
 
-You should now see `.env.production` and `infra/vault/production/` in `/tmp/test-clone`. Cleanup: `rm -rf /tmp/test-clone`.
+(They'll be prompted for the passphrase.) After that, `bunx @muthuishere/secret-lib pull dev` works on their machine.
 
-### 9. Delete the local config file
+## 5. Daily flow
 
-`infra/setup/envconfig.production.json` is gitignored, but it sits on disk in plaintext. Either delete it or keep it out of cloud sync / Time Machine / screen shares. You only need it again to *generate* a fresh export line (e.g. during a key rotation).
+```bash
+# You edited .env.dev locally:
+task -t infra/setup/Taskfile.yml dev:push
 
-### 10. Share with the team
+# A teammate updated something — get the latest:
+task -t infra/setup/Taskfile.yml dev:pull
+```
 
-Send teammates one thing: the **export line** from Step 5. Use whatever secret-sharing channel your team uses. They paste it into their `~/.zshrc`, run `task prod:pull`, and they're done. See [`using.md`](./using.md).
+That's it.
 
-## Repeat for other envs
+## Operational notes
 
-For `LOCAL`, `DEV`, `STAGING`, etc. — repeat steps 4–7 with `NAME=LOCAL`, `NAME=DEV`, etc. Each env gets its own `envconfig.<lowercase-name>.json` and its own export line.
-
-You can reuse the same S3 bucket for all envs (they're stored under separate prefix paths: `production/`, `dev/`, `local/`).
-
-## Rotating the encryption key
-
-When you want to rotate (compromised key, employee left, etc.):
-
-1. Edit `infra/setup/envconfig.production.json`, generate a new `encryption.key` + `salt` with `openssl rand`.
-2. `task init-env NAME=PRODUCTION` → new export line.
-3. Update your `~/.zshrc`, re-share the new export line with the team, and `source`.
-4. `task prod:push` to seed S3 with a bundle encrypted under the new key.
-5. Coordinate with the team — they all need the new export line. Old bundles in S3 stay there but become unreadable.
-
-## Common mistakes
-
-- **Forgetting to `source ~/.zshrc`** after pasting the export — `task prod:pull` will fail with "VIDEO_AI_ENV_PRODUCTION is not set".
-- **Editing `envconfig.production.json` after step 5** — your `~/.zshrc` export line is now stale; re-run `init-env`.
-- **Committing `envconfig.production.json`** — it has plaintext S3 creds + the encryption key. Make sure your gitignore is correct *before* you create the file.
-- **Pulling before pushing** — `task prod:pull` fails with "pointer is empty" until someone has done the first push.
+- **Local backups** of `.env` + vault are made automatically before every `pull` and stored encrypted at `~/.config/localdevconfig/<env>-<ts>.zip.enc`. Two-deep rolling buffer. Restore with `secret-lib restore-backup <env> <backup> <target-dir>`.
+- **Rotation:** to rotate the encryption key, the easiest path today is `delete-key` + `init` (generates fresh) + `push`. A `rotate-key` command that re-encrypts existing S3 versions is on the roadmap.
+- **Multi-machine:** the keychain entry is per-machine. To use the same (repo, env) on a new laptop, either `export` from the old machine and `import` on the new, or have a teammate send you a fresh share file.

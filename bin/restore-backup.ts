@@ -1,33 +1,33 @@
 #!/usr/bin/env bun
-// Usage: restore-backup <NAME> <backup-file> <target-dir> [--prefix=PREFIX]
+// Usage: secret-lib restore-backup <env> <backup-file> <target-dir> [--repo=<name>]
 //
-// Decrypts a ~/.config/localdevconfig/<name>-<ts>.zip.enc file using the
-// key+salt from <PREFIX>_<NAME>, then unzips into <target-dir>.
+// Decrypts a ~/.config/localdevconfig/<env>-<ts>.zip.enc file using the
+// key+salt from the (repo, env) config, then unzips into <target-dir>.
 //
-// Use this when a `pull-env` overwrote local edits and you want to recover
+// Use this when a `pull` overwrote local edits and you want to recover
 // the prior state from one of the rolling backups.
 
 import { existsSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "../src/argv";
-import { loadFromEnv } from "../src/envconfig";
+import { getRepoName } from "../src/repo";
+import { loadEnvConfig } from "../src/envconfig";
 import { decrypt } from "../src/crypto";
 import { unzipTo } from "../src/archive";
 
 export async function main(argv: string[]): Promise<void> {
   const { positional, flags } = parseArgs(argv);
-  const name = positional[0];
+  const env = positional[0];
   const backupArg = positional[1];
   const targetArg = positional[2];
-  const prefix = flags.prefix;
-
-  if (!name || !backupArg || !targetArg) {
+  if (!env || !backupArg || !targetArg) {
     console.error(
-      "usage: restore-backup <NAME> <backup-file> <target-dir> [--prefix=PREFIX]",
+      "usage: secret-lib restore-backup <env> <backup-file> <target-dir> [--repo=<name>]",
     );
     process.exit(1);
   }
+  const repo = await getRepoName({ override: flags.repo });
 
   const backupPath = resolve(backupArg);
   const targetDir = resolve(targetArg);
@@ -39,7 +39,7 @@ export async function main(argv: string[]): Promise<void> {
 
   let cfg;
   try {
-    cfg = loadFromEnv(name, prefix);
+    cfg = await loadEnvConfig(repo, env);
   } catch (e) {
     console.error((e as Error).message);
     process.exit(1);
@@ -48,12 +48,8 @@ export async function main(argv: string[]): Promise<void> {
   console.log(`[1/3] reading ${backupPath}`);
   const encrypted = await Bun.file(backupPath).bytes();
 
-  console.log(`[2/3] decrypting with key+salt from env`);
-  const zipBytes = await decrypt(
-    encrypted,
-    cfg.encryption.key,
-    cfg.encryption.salt,
-  );
+  console.log(`[2/3] decrypting with keychain-stored key`);
+  const zipBytes = await decrypt(encrypted, cfg.encryption.key, cfg.encryption.salt);
 
   const tmpZip = join(
     tmpdir(),
