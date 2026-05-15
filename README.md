@@ -152,9 +152,9 @@ Every command works fully via flags or fully via prompts.
 | `init <env>` | Generate AES key (→ keychain), write self-contained per-repo config, create the resolved vault folder, relocate an existing root `.env.<env>` if found (with a prompt). First-ever run on a machine also writes `~/.config/vsync/defaults` from the supplied values; subsequent runs pre-fill from defaults. Flags: `--bucket --endpoint --region --access-key --secret-key --use-ssl --vault-folder=<path> --migrate-from=<path> --no-migrate`. |
 | `export <env>` | Write a passphrase-encrypted `.share` file containing the full per-repo config + key. Flags: `--out=<path>` (default `./<repo>-<env>.share`), `--passphrase=<p>` (default: auto-generated readable passphrase). |
 | `import <env> <file>` | Decrypt a `.share` file with its passphrase; write the per-repo config + save key to keychain. Idempotent — re-importing overwrites. Flags: `--passphrase=<p>`, `--file=<path>` (alt to positional). |
-| `push <env>` | Zip the resolved vault folder → manifest-seal → AES-256-GCM encrypt → upload to `s3://<bucket>/<env>/versions/<ts>.enc`, then update `s3://<bucket>/<env>/latest`. |
+| `push <env>` | Zip the resolved vault folder → manifest-seal → AES-256-GCM encrypt → upload to `s3://<bucket>/<repo>/<env>/versions/<ts>.enc`, then update `s3://<bucket>/<repo>/<env>/latest`. |
 | `pull <env>` | Read `latest` pointer → download version → verify embedded manifest timestamp matches pointer (anti-rollback) → decrypt → unzip into the resolved vault folder. Auto-backs up existing contents first. |
-| `versions <env>` | List `s3://<bucket>/<env>/versions/`. One line per version with size + age, `* latest` marker on the active one. Read-only; no decrypt. |
+| `versions <env>` | List `s3://<bucket>/<repo>/<env>/versions/`. One line per version with size + age, `* latest` marker on the active one. Read-only; no decrypt. |
 | `sync <env> <gh\|gcp\|all>` | Read `<vaultFolder>/.env.<env>` → push each KV to the named target. Parallel (6 workers, 10-min timeout). First run prompts for routing config (gh repo / gcp project) and saves it; subsequent runs zero-prompt. Flags: `--gh-repo=<owner/name>`, `--gcp-project=<id>`. |
 | `docs` | Print a short onboarding reference (commands, vault layout, backup recovery procedure) to stdout. Pipe wherever you want — e.g. `vsync docs > infra/AGENTS.md`. |
 

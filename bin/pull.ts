@@ -37,7 +37,7 @@ export async function main(argv: string[]): Promise<void> {
   const root = await getRepoRoot();
   const vaultFolder = resolveVaultFolder(cfg, env);
 
-  const prefixKey = `${env.toLowerCase()}/`;
+  const prefixKey = `${repo}/${env.toLowerCase()}/`;
   const pointerKey = `${prefixKey}latest`;
   const client = makeClient(cfg.s3);
 
@@ -63,7 +63,17 @@ export async function main(argv: string[]): Promise<void> {
   const encrypted = await client.file(versionKey).bytes();
 
   console.log(`[4/6] decrypting`);
-  const wrapped = await decrypt(encrypted, cfg.encryption.key, cfg.encryption.salt);
+  let wrapped: Uint8Array;
+  try {
+    wrapped = await decrypt(encrypted, cfg.encryption.key, cfg.encryption.salt);
+  } catch (e) {
+    console.error(
+      `failed to decrypt s3://${cfg.s3.bucket}/${versionKey} — the keychain key for ${repo}/${env} doesn't match the bundle's seal.\n` +
+        `Either the bundle was sealed by a different key (rotated since), or the bucket layout is wrong.\n` +
+        `(${(e as Error).message ?? e})`,
+    );
+    process.exit(1);
+  }
 
   console.log(`[5/6] verifying manifest ts`);
   const { ts: embeddedTs, payload: zipBytes } = unwrap(wrapped);
