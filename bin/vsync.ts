@@ -33,9 +33,9 @@ function usage(code = 0): never {
   out("  import <env> <share-file>       restore a .share file into local config + keychain");
   out("");
   out("day-to-day");
-  out("  push <env>                      upload local infra/vault/<env>/ to S3");
-  out("  pull <env>                      download from S3");
-  out("  versions <env>                  list versions on S3 (read-only)");
+  out("  push <env>                      encrypt + upload local vault folder to s3://<bucket>/<repo>/<env>/");
+  out("  pull <env>                      download from s3://<bucket>/<repo>/<env>/ + decrypt + unpack");
+  out("  versions <env>                  list versions on S3 for this (repo, env) (read-only)");
   out("");
   out("external fanout");
   out("  sync <env> <gh|gcp|all>         push <vaultFolder>/.env.<env> KVs to GH/GCP secret stores");

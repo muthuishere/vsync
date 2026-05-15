@@ -30,7 +30,7 @@ export async function main(argv: string[]): Promise<void> {
   }
 
   const client = makeClient(cfg.s3);
-  const prefix = `${env.toLowerCase()}/versions/`;
+  const prefix = `${repo}/${env.toLowerCase()}/versions/`;
 
   let listing;
   try {
@@ -44,7 +44,7 @@ export async function main(argv: string[]): Promise<void> {
   // is OK (means no successful push yet).
   let latestTs = "";
   try {
-    latestTs = (await client.file(`${env.toLowerCase()}/latest`).text()).trim();
+    latestTs = (await client.file(`${repo}/${env.toLowerCase()}/latest`).text()).trim();
   } catch {
     // No pointer yet.
   }

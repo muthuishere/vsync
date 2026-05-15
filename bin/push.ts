@@ -47,7 +47,7 @@ export async function main(argv: string[]): Promise<void> {
   }
 
   const ts = timestamp();
-  const prefixKey = `${env.toLowerCase()}/`;
+  const prefixKey = `${repo}/${env.toLowerCase()}/`;
   const versionKey = `${prefixKey}versions/${ts}.enc`;
   const pointerKey = `${prefixKey}latest`;
 

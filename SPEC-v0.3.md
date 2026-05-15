@@ -185,9 +185,9 @@ This is the *only* thing migrated. v0.2.x on-disk config and keychain entries ar
 
 | Cmd | What |
 |---|---|
-| `push <env>` | Zip the resolved vault folder → manifest-seal → AES-256-GCM → upload to `s3://<bucket>/<env>/versions/<ts>.enc` + update `s3://<bucket>/<env>/latest`. |
+| `push <env>` | Zip the resolved vault folder → manifest-seal → AES-256-GCM → upload to `s3://<bucket>/<repo>/<env>/versions/<ts>.enc` + update `s3://<bucket>/<repo>/<env>/latest`. |
 | `pull <env>` | Pointer → version → manifest-ts verify → decrypt → unzip into the resolved vault folder. Auto-backs up existing contents to `~/.config/vsync/backups/<env>-<ts>.zip.enc` (the format and decryption procedure are documented in `vsync docs`). |
-| `versions <env>` | List `s3://<bucket>/<env>/versions/` — one line per `<ts>.enc` with size + age, `* latest` marker on the active one. Read-only; no decrypt. |
+| `versions <env>` | List `s3://<bucket>/<repo>/<env>/versions/` — one line per `<ts>.enc` with size + age, `* latest` marker on the active one. Read-only; no decrypt. |
 
 ### 5.4 External fanout
 
@@ -258,7 +258,7 @@ vsync/
 │   ├── import.ts           # payload v2
 │   ├── push.ts             # uses resolved vault folder
 │   ├── pull.ts             # uses resolved vault folder
-│   ├── versions.ts         # NEW — list s3://<bucket>/<env>/versions/
+│   ├── versions.ts         # NEW — list s3://<bucket>/<repo>/<env>/versions/ for this (repo, env)
 │   ├── sync.ts             # renamed from sync-secrets.ts, routing moved to per-repo
 │   └── docs.ts             # NEW — prints static reference to stdout
 ├── src/
