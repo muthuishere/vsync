@@ -8,7 +8,7 @@
 
 import { secrets } from "bun";
 
-export const KEYCHAIN_SERVICE = "com.deemwar.secret-lib";
+export const KEYCHAIN_SERVICE = "tools.vsync";
 
 function accountName(repo: string, env: string): string {
   if (!repo) throw new Error("repo is required for keychain operations");
