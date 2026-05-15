@@ -22,13 +22,18 @@ const payload: ExportPayload = {
   key: "test-only-key-meeting-minimum-length-",
 };
 
+// PBKDF2 with 600k iters runs once per build/parse; concurrent suite
+// load can blow Bun's default 5s test timeout. 15s gives 2-3 derivations
+// comfortable headroom.
+const PBKDF2_TIMEOUT = 15000;
+
 describe("share file round-trip", () => {
   test("build → parse roundtrips with same passphrase", async () => {
     const pp = generatePassphrase();
     const bytes = await buildShareFile(payload, pp);
     const back = await parseShareFile(bytes, pp);
     expect(back).toEqual(payload);
-  });
+  }, PBKDF2_TIMEOUT);
 
   test("output starts with the 'SLS1' magic header", async () => {
     const bytes = await buildShareFile(payload, generatePassphrase());
@@ -36,14 +41,14 @@ describe("share file round-trip", () => {
     expect(bytes[1]).toBe(0x4c); // L
     expect(bytes[2]).toBe(0x53); // S
     expect(bytes[3]).toBe(0x31); // 1
-  });
+  }, PBKDF2_TIMEOUT);
 
   test("parse rejects the wrong passphrase", async () => {
     const bytes = await buildShareFile(payload, "right-passphrase-abcd");
     await expect(parseShareFile(bytes, "wrong-passphrase-xyz")).rejects.toThrow(
       /decrypt/,
     );
-  });
+  }, PBKDF2_TIMEOUT);
 
   test("parse rejects a tampered ciphertext", async () => {
     const pp = generatePassphrase();
@@ -51,7 +56,7 @@ describe("share file round-trip", () => {
     // Flip a byte well into the ciphertext (past header + salt).
     bytes[bytes.length - 1] ^= 0xff;
     await expect(parseShareFile(bytes, pp)).rejects.toThrow();
-  });
+  }, PBKDF2_TIMEOUT);
 
   test("parse rejects a file missing the magic header", async () => {
     const bytes = await buildShareFile(payload, generatePassphrase());
@@ -59,25 +64,25 @@ describe("share file round-trip", () => {
     await expect(parseShareFile(bytes, "x".repeat(12))).rejects.toThrow(
       /magic/,
     );
-  });
+  }, PBKDF2_TIMEOUT);
 
   test("parse rejects a file truncated mid-salt", async () => {
     const bytes = await buildShareFile(payload, generatePassphrase());
     const truncated = bytes.subarray(0, 5);
     await expect(parseShareFile(truncated, "x".repeat(12))).rejects.toThrow();
-  });
+  }, PBKDF2_TIMEOUT);
 
   test("two shares of the same payload differ (random salt + IV)", async () => {
     const pp = generatePassphrase();
     const a = await buildShareFile(payload, pp);
     const b = await buildShareFile(payload, pp);
     expect(Buffer.compare(Buffer.from(a), Buffer.from(b))).not.toBe(0);
-  });
+  }, PBKDF2_TIMEOUT);
 
   test("rejects a payload with the wrong version", async () => {
     const wrong = { ...payload, version: 99 } as any;
     await expect(buildShareFile(wrong, "x".repeat(12))).rejects.toThrow(
       /version/,
     );
-  });
+  }, PBKDF2_TIMEOUT);
 });
