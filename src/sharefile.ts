@@ -71,8 +71,8 @@ export async function parseShareFile(
   for (let i = 0; i < SHARE_MAGIC.length; i++) {
     if (bytes[i] !== SHARE_MAGIC[i]) {
       throw new Error(
-        "not a secret-lib share file (magic header missing). " +
-          "Check that you passed the file produced by `secret-lib export`.",
+        "not a vsync share file (magic header missing). " +
+          "Check that you passed the file produced by `vsync export`.",
       );
     }
   }

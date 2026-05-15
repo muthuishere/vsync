@@ -1,8 +1,9 @@
-// envconfig.ts — the in-memory shape used by push-env / pull-env and the
-// glue that combines two on-disk sources into it:
+// envconfig.ts — the in-memory composite used by push / pull / sync.
+// Glues two on-disk sources together:
 //
-//   1. `~/.config/deemwar/config/<repo>/env_<env>` — bucket creds + salt
-//      + file paths, gzipped JSON, chmod 0600. See repoconfig.ts.
+//   1. `~/.config/vsync/<repo>/env_<env>` — self-contained per-(repo, env)
+//      config (S3 creds + salt + paths + sync routing). gzipped JSON,
+//      chmod 0600. See repoconfig.ts.
 //   2. OS keychain (macOS Keychain / Linux libsecret / Windows Credential
 //      Manager) — the AES encryption key. See keychain.ts.
 //
@@ -48,7 +49,7 @@ export class ConfigFileMissingError extends Error {
   constructor(repo: string, env: string, filePath: string) {
     super(
       `no config file for ${repo}/${env} at ${filePath}.\n` +
-        `Run 'secret-lib init ${env} --repo=${repo}' to create one, or 'secret-lib import ${env} <share-file>' if a teammate sent you one.`,
+        `Run 'vsync init ${env} --repo=${repo}' to create one, or 'vsync import ${env} <share-file>' if a teammate sent you one.`,
     );
     this.name = "ConfigFileMissingError";
   }
@@ -58,9 +59,8 @@ export class KeyMissingError extends Error {
   constructor(repo: string, env: string) {
     super(
       `encryption key for ${repo}/${env} not found in OS keychain.\n` +
-        `Run 'secret-lib import ${env} <share-file>' if a teammate sent you the share file (it carries the key),\n` +
-        `or 'secret-lib link ${env} --key=<key>' if you only have the key,\n` +
-        `or 'secret-lib init ${env} --repo=${repo}' to generate a brand new one.`,
+        `Run 'vsync import ${env} <share-file>' if a teammate sent you the share file (it carries the key),\n` +
+        `or 'vsync init ${env} --repo=${repo}' to generate a fresh one.`,
     );
     this.name = "KeyMissingError";
   }
