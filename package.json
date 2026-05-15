@@ -1,18 +1,15 @@
 {
-  "name": "@muthuishere/secret-lib",
-  "version": "0.2.0",
-  "description": "Encrypted env-sync CLI for repos. File-based config + OS keychain for the encryption key + AES-GCM-on-S3 for the bundle. Bun-native, run via bunx.",
+  "name": "@muthuishere/vsync",
+  "version": "0.3.0",
+  "description": "Encrypted secret-sync CLI for small teams. Self-contained per-(repo, env) config + OS keychain key + AES-GCM-on-S3 + share-file onboarding + fanout to GitHub/GCP. Bun-native, run via bunx.",
   "type": "module",
   "bin": {
-    "secret-lib": "./bin/secret-lib.ts"
+    "vsync": "./bin/vsync.ts"
   },
   "files": [
     "bin",
     "src",
-    "examples",
-    "README.md",
-    "onboarding.md",
-    "using.md"
+    "README.md"
   ],
   "scripts": {
     "test": "bun test"
@@ -30,11 +27,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/muthuishere/secret-lib.git"
+    "url": "git+https://github.com/muthuishere/vsync.git"
   },
-  "homepage": "https://github.com/muthuishere/secret-lib#readme",
+  "homepage": "https://github.com/muthuishere/vsync#readme",
   "bugs": {
-    "url": "https://github.com/muthuishere/secret-lib/issues"
+    "url": "https://github.com/muthuishere/vsync/issues"
   },
   "publishConfig": {
     "access": "public"
