@@ -17,7 +17,7 @@ import { secrets } from "bun";
 
 // Scope every test to a unique repo namespace so failed cleanup never
 // leaks into the rest of the developer's keychain.
-const REPO = `secret-lib-tests-${Math.random().toString(36).slice(2, 8)}`;
+const REPO = `vsync-tests-${Math.random().toString(36).slice(2, 8)}`;
 const ENV_A = "alpha";
 const ENV_B = "beta";
 
