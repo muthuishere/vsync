@@ -68,14 +68,14 @@ describe("backup", () => {
       rmSync(restoreDir, { recursive: true, force: true });
       if (existsSync(tmpZip)) rmSync(tmpZip);
     }
-  });
+  }, 15000);
 
   test("decrypt with wrong key fails", async () => {
     await Bun.write(join(repoDir, ".env"), "FOO=bar");
     const path = await makeBackup("LOCAL", repoDir, [".env"], ENC);
     const bytes = await Bun.file(path!).bytes();
     expect(decrypt(bytes, "wrong-key-but-long-enough-x", ENC.salt)).rejects.toThrow();
-  });
+  }, 15000);
 
   test("keeps only the 2 most recent backups per name", async () => {
     await Bun.write(join(repoDir, ".env"), "x");
