@@ -14,8 +14,8 @@ For prior design context (threat model, crypto envelope, manifest seal, repo-nam
 |---|---|---|
 | npm | `@muthuishere/secret-lib` | `@muthuishere/vsync` |
 | Bin | `secret-lib` | `vsync` |
-| Keychain UTI | `com.deemwar.secret-lib` | `tools.vsync` |
-| Config root | `~/.config/deemwar/config/<repo>/env_<env>` | `~/.config/vsync/<repo>/env_<env>` + optional `~/.config/vsync/defaults` |
+| Keychain UTI | (0.2.x service) | `tools.vsync` |
+| Config root | (0.2.x path under `~/.config/`) | `~/.config/vsync/<repo>/env_<env>` + optional `~/.config/vsync/defaults` |
 | Env file path | `.env.<env>` at repo root | `<vaultFolder>/.env.<env>`, default `infra/vault/<env>` |
 | Vault folder | `infra/vault/<env>` (configurable, prompted) | Default `infra/vault/<env>`, `--vault-folder=<path>` override on `init` |
 | Scaffolding | `initapp` writes stubs + Taskfile + `.gitignore` rules | Dropped. `init` warns if the vault folder's parent isn't in `.gitignore`. Onboarding docs via `vsync docs` (stdout). |
@@ -172,7 +172,7 @@ The only filesystem artefact `init` writes inside the repo is the resolved vault
 2. On Y, `mv` the file.
 3. On N, leave alone and print a one-line warning naming the new path.
 
-This is the *only* thing migrated. v0.2.x config files at `~/.config/deemwar/...` and keychain entries under `com.deemwar.secret-lib` are not auto-read. Re-`init` from scratch is the supported path. See §7.
+This is the *only* thing migrated. v0.2.x on-disk config and keychain entries are not auto-read. Re-`init` from scratch is the supported path. See §7.
 
 ### 5.2 Sharing
 
@@ -232,7 +232,7 @@ Everything else is pushed verbatim.
 
 ## 7. Migration policy
 
-0.3.0 is a clean break. `@muthuishere/secret-lib` 0.2.x stays on npm forever; users who can't migrate keep using it. Existing users on a 0.2.x deployment re-`init` from scratch (which auto-relocates the root `.env.<env>` per §5.1). Old `~/.config/deemwar/` trees and `com.deemwar.secret-lib` keychain entries can be deleted at any time; nothing in 0.3.x reads them.
+0.3.0 is a clean break. `@muthuishere/secret-lib` 0.2.x stays on npm forever; users who can't migrate keep using it. Existing users on a 0.2.x deployment re-`init` from scratch (which auto-relocates the root `.env.<env>` per §5.1). Any leftover 0.2.x on-disk config tree and keychain entries can be deleted at any time; nothing in 0.3.x reads them.
 
 ---
 

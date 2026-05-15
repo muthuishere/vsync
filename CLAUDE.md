@@ -27,8 +27,8 @@ Every (repo, env) pair has **two persistent halves** that must both be present f
 
 | Half | Location | Module |
 |---|---|---|
-| Config file (gzipped JSON, `0600`) | `${XDG_CONFIG_HOME:-~/.config}/deemwar/config/<repo>/env_<env>` | `src/configfile.ts` |
-| Encryption key (base64 AES-256) | OS keychain via `Bun.secrets` — service `com.deemwar.secret-lib`, account `<repo>/<env>` | `src/keychain.ts` |
+| Config file (gzipped JSON, `0600`) | `${XDG_CONFIG_HOME:-~/.config}/<root>/config/<repo>/env_<env>` (root + path layout finalised per release; v0.3.0 uses `vsync/<repo>/env_<env>`) | `src/configfile.ts` (→ `src/repoconfig.ts` in v0.3.0) |
+| Encryption key (base64 AES-256) | OS keychain via `Bun.secrets` — service is the per-release UTI (v0.3.0: `tools.vsync`), account `<repo>/<env>` | `src/keychain.ts` |
 
 `src/envconfig.ts::loadEnvConfig(repo, env)` is the single read-path that joins them into a runtime `EnvConfig`. If you're adding a subcommand that needs S3 creds + the key, call this — don't reinvent the load. Missing file → `ConfigFileMissingError`; missing key → `KeyMissingError`. Both errors carry user-actionable next-step messages (init / import / link); preserve that pattern when adding new failure modes.
 
