@@ -2,7 +2,7 @@
 // glue that combines two on-disk sources into it:
 //
 //   1. `~/.config/deemwar/config/<repo>/env_<env>` — bucket creds + salt
-//      + file paths, gzipped JSON, chmod 0600. See configfile.ts.
+//      + file paths, gzipped JSON, chmod 0600. See repoconfig.ts.
 //   2. OS keychain (macOS Keychain / Linux libsecret / Windows Credential
 //      Manager) — the AES encryption key. See keychain.ts.
 //
@@ -17,8 +17,8 @@
 
 import type { S3Credentials } from "./s3";
 import { encodeGzipBase64, decodeGzipBase64 } from "./codec";
-import type { ConfigFile } from "./configfile";
-import { loadConfigFile, validateConfigFile } from "./configfile";
+import type { ConfigFile } from "./repoconfig";
+import { loadConfigFile, validateConfigFile } from "./repoconfig";
 import { getKey } from "./keychain";
 
 export const MIN_KEY_LEN = 20;
@@ -75,7 +75,7 @@ export async function loadEnvConfig(
   repo: string,
   env: string,
 ): Promise<EnvConfig> {
-  const { configFilePath } = await import("./configfile");
+  const { configFilePath } = await import("./repoconfig");
   const cfg = await loadConfigFile(repo, env);
   if (!cfg) {
     throw new ConfigFileMissingError(repo, env, configFilePath(repo, env));

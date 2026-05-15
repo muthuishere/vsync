@@ -19,8 +19,8 @@ import {
   type EnvConfig,
   type ExportPayload,
 } from "../src/envconfig";
-import type { ConfigFile } from "../src/configfile";
-import { saveConfigFile, deleteConfigFile } from "../src/configfile";
+import type { ConfigFile } from "../src/repoconfig";
+import { saveConfigFile, deleteConfigFile } from "../src/repoconfig";
 import { setKey, deleteKey, KEYCHAIN_SERVICE } from "../src/keychain";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

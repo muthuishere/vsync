@@ -8,13 +8,12 @@ import {
 } from "bun:test";
 import {
   configFilePath,
-  configBaseDir,
   saveConfigFile,
   loadConfigFile,
   deleteConfigFile,
   validateConfigFile,
   type ConfigFile,
-} from "../src/configfile";
+} from "../src/repoconfig";
 import { mkdtempSync, rmSync, statSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,7 +35,7 @@ let tmpRoot: string;
 let prevXdg: string | undefined;
 
 beforeAll(() => {
-  tmpRoot = mkdtempSync(join(tmpdir(), "secret-lib-configfile-"));
+  tmpRoot = mkdtempSync(join(tmpdir(), "vsync-repoconfig-"));
   prevXdg = process.env.XDG_CONFIG_HOME;
   process.env.XDG_CONFIG_HOME = tmpRoot;
 });
@@ -48,13 +47,9 @@ afterAll(() => {
 });
 
 describe("paths", () => {
-  test("configBaseDir respects XDG_CONFIG_HOME", () => {
-    expect(configBaseDir()).toBe(join(tmpRoot, "deemwar", "config"));
-  });
-
-  test("configFilePath is repo + env scoped, env is lowercased", () => {
+  test("configFilePath sits at vsync/<repo>/env_<env>, env lowercased", () => {
     expect(configFilePath("reqsume", "DEV")).toBe(
-      join(tmpRoot, "deemwar", "config", "reqsume", "env_dev"),
+      join(tmpRoot, "vsync", "reqsume", "env_dev"),
     );
   });
 
@@ -66,7 +61,7 @@ describe("paths", () => {
 
 describe("save / load roundtrip", () => {
   beforeEach(() => {
-    rmSync(join(tmpRoot, "deemwar"), { recursive: true, force: true });
+    rmSync(join(tmpRoot, "vsync"), { recursive: true, force: true });
   });
 
   test("save writes gzipped JSON; load parses it back", async () => {
