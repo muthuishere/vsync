@@ -8,6 +8,7 @@ const payload: ExportPayload = {
   repo: "acme",
   env: "dev",
   config: {
+    version: 1,
     s3: {
       endpoint: "hel1.example.com",
       bucket: "b",
@@ -17,7 +18,6 @@ const payload: ExportPayload = {
       secretAccessKey: "sec",
     },
     encryption: { salt: "long-enough-salt-string" },
-    files: { envFile: ".env.dev", vaultFolder: "infra/vault/dev" },
   },
   key: "test-only-key-meeting-minimum-length-",
 };

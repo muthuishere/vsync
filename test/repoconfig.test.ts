@@ -19,6 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const sample: ConfigFile = {
+  version: 1,
   s3: {
     endpoint: "hel1.example.com",
     bucket: "b",
@@ -28,7 +29,15 @@ const sample: ConfigFile = {
     secretAccessKey: "sec",
   },
   encryption: { salt: "long-enough-salt-string" },
-  files: { envFile: ".env.dev", vaultFolder: "infra/vault/dev" },
+};
+
+const sampleWithOverrides: ConfigFile = {
+  ...sample,
+  files: { vaultFolder: "apps/foo/infra/vault/dev" },
+  sync: {
+    gh: { repo: "muthuishere/reqsume" },
+    gcp: { project: "reqsume-dev" },
+  },
 };
 
 let tmpRoot: string;
@@ -95,8 +104,23 @@ describe("save / load roundtrip", () => {
 });
 
 describe("validateConfigFile", () => {
-  test("accepts a complete config", () => {
+  test("accepts a minimal config", () => {
     expect(() => validateConfigFile(structuredClone(sample))).not.toThrow();
+  });
+
+  test("accepts a config with overrides", () => {
+    expect(() => validateConfigFile(structuredClone(sampleWithOverrides))).not.toThrow();
+  });
+
+  test("rejects unsupported version", () => {
+    const bad = { ...structuredClone(sample), version: 2 } as any;
+    expect(() => validateConfigFile(bad)).toThrow(/version/);
+  });
+
+  test("rejects missing version", () => {
+    const bad = structuredClone(sample) as any;
+    delete bad.version;
+    expect(() => validateConfigFile(bad)).toThrow(/version/);
   });
 
   for (const path of [
@@ -105,8 +129,6 @@ describe("validateConfigFile", () => {
     ["s3", "accessKeyId"],
     ["s3", "secretAccessKey"],
     ["s3", "bucket"],
-    ["files", "envFile"],
-    ["files", "vaultFolder"],
   ]) {
     test(`rejects when ${path.join(".")} is missing`, () => {
       const bad = structuredClone(sample);
@@ -127,5 +149,20 @@ describe("validateConfigFile", () => {
     // @ts-expect-error
     bad.encryption.salt = "";
     expect(() => validateConfigFile(bad)).toThrow(/salt/);
+  });
+
+  test("rejects non-string vaultFolder", () => {
+    const bad = { ...structuredClone(sample), files: { vaultFolder: 42 } } as any;
+    expect(() => validateConfigFile(bad)).toThrow(/vaultFolder/);
+  });
+
+  test("rejects sync.gh missing repo string", () => {
+    const bad = { ...structuredClone(sample), sync: { gh: { repo: "" } } } as any;
+    expect(() => validateConfigFile(bad)).toThrow(/sync\.gh\.repo/);
+  });
+
+  test("rejects sync.gcp missing project string", () => {
+    const bad = { ...structuredClone(sample), sync: { gcp: { project: "" } } } as any;
+    expect(() => validateConfigFile(bad)).toThrow(/sync\.gcp\.project/);
   });
 });
