@@ -251,7 +251,7 @@ vsync push dev
 vsync export dev        # re-share with team
 ```
 
-Old `~/.config/deemwar/` and `com.deemwar.secret-lib` keychain entries can be deleted; nothing in 0.3.x reads them. `@muthuishere/secret-lib` 0.2.x stays on npm for users who can't migrate.
+Any leftover 0.2.x on-disk config tree and keychain entries can be deleted; nothing in 0.3.x reads them. `@muthuishere/secret-lib` 0.2.x stays on npm for users who can't migrate.
 
 ---
 
