@@ -1,24 +1,24 @@
-// configfile.ts — the on-disk half of a secret-lib config. Stores the
-// non-key portion of an EnvConfig (S3 bucket creds + salt + which files
-// to sync) as gzipped JSON at:
+// repoconfig.ts — the on-disk per-(repo, env) half of a vsync config.
+// Self-contained: holds everything push / pull / sync need at runtime,
+// minus the encryption key (which lives in the OS keychain — see
+// keychain.ts).
 //
-//   ${XDG_CONFIG_HOME:-$HOME/.config}/deemwar/config/<repo>/env_<env>
+// Path: ${XDG_CONFIG_HOME:-$HOME/.config}/vsync/<repo>/env_<env>
 //
-// Directory chmod 0700, file chmod 0600. The companion encryption key
-// lives in the OS keychain (see keychain.ts) so this file alone is not
-// enough to decrypt any S3-stored bundle.
+// File mode 0600, parent dir 0700. Stored as gzip(JSON) — raw bytes,
+// no base64 wrapper.
 
 import { gunzipSync, gzipSync } from "node:zlib";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-import * as os from "node:os";
 
 import type { S3Credentials } from "./s3";
+import { vsyncBaseDir } from "./defaults";
 
 /**
- * ConfigFile is the on-disk shape — everything an EnvConfig has except
- * `encryption.key`. The key is held separately in the OS keychain and
- * spliced back in at load time by loadEnvConfig.
+ * On-disk shape. Same structure used by every push / pull / sync code
+ * path — `loadEnvConfig` (envconfig.ts) just splices in the keychain key
+ * to produce the runtime composite.
  */
 export type ConfigFile = {
   s3: S3Credentials;
@@ -26,21 +26,11 @@ export type ConfigFile = {
   files: { envFile: string; vaultFolder: string };
 };
 
-const ROOT_DIRNAME = "deemwar";
-const CONFIG_SUBDIR = "config";
-
-/** Base directory for all secret-lib config files. Honours XDG_CONFIG_HOME. */
-export function configBaseDir(): string {
-  const xdg = process.env.XDG_CONFIG_HOME;
-  const base = xdg && xdg.trim() ? xdg : path.join(os.homedir(), ".config");
-  return path.join(base, ROOT_DIRNAME, CONFIG_SUBDIR);
-}
-
 /** Full path for a given (repo, env). env is lowercased; repo is taken as-is. */
 export function configFilePath(repo: string, env: string): string {
   if (!repo) throw new Error("repo is required");
   if (!env) throw new Error("env is required");
-  return path.join(configBaseDir(), repo, `env_${env.toLowerCase()}`);
+  return path.join(vsyncBaseDir(), repo, `env_${env.toLowerCase()}`);
 }
 
 /**
@@ -58,7 +48,6 @@ export async function saveConfigFile(
   const dir = path.dirname(file);
 
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-  // Ensure mode even if the directory already existed.
   try {
     await fs.chmod(dir, 0o700);
   } catch {

@@ -10,7 +10,7 @@
 
 import { parseArgs } from "../src/argv";
 import { getRepoName } from "../src/repo";
-import { saveConfigFile, configFilePath } from "../src/configfile";
+import { saveConfigFile, configFilePath } from "../src/repoconfig";
 import { setKey } from "../src/keychain";
 import { parseShareFile } from "../src/sharefile";
 import { askText, askSecret, isTty } from "../src/prompt";

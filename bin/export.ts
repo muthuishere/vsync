@@ -11,7 +11,7 @@
 
 import { parseArgs } from "../src/argv";
 import { getRepoName } from "../src/repo";
-import { loadConfigFile, configFilePath } from "../src/configfile";
+import { loadConfigFile, configFilePath } from "../src/repoconfig";
 import { getKey } from "../src/keychain";
 import { EXPORT_BLOB_VERSION, type ExportPayload } from "../src/envconfig";
 import { buildShareFile } from "../src/sharefile";

@@ -28,7 +28,7 @@
 
 import { parseArgs } from "../src/argv";
 import { getRepoName } from "../src/repo";
-import { saveConfigFile, configFilePath, type ConfigFile } from "../src/configfile";
+import { saveConfigFile, configFilePath, type ConfigFile } from "../src/repoconfig";
 import { setKey, generateKey } from "../src/keychain";
 import { askText, askBool, isTty } from "../src/prompt";
 
