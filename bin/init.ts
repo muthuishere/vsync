@@ -51,11 +51,18 @@ import {
 import { askText, askBool, isTty } from "../src/prompt";
 
 function envFromArg(env?: string): string {
-  if (!env) throw new Error("env is required (e.g. dev, local, production)");
+  if (!env) {
+    console.error("usage: vsync init <env> [flags]");
+    console.error(
+      "  e.g. vsync init dev --bucket=my-bucket --endpoint=https://s3.example.com",
+    );
+    process.exit(1);
+  }
   if (!/^[a-z][a-z0-9_-]*$/.test(env)) {
-    throw new Error(
+    console.error(
       `env must be lowercase letters/digits/underscore/hyphen (got "${env}")`,
     );
+    process.exit(1);
   }
   return env;
 }
