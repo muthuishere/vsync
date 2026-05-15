@@ -5,3 +5,4 @@ node_modules/
 # Only the placeholder sample is committed.
 envconfig.*.json
 !envconfig.sample.json
+infra/vault/
