@@ -22,15 +22,15 @@ describe("backup", () => {
   beforeEach(() => {
     configDir = mkdtempSync(join(tmpdir(), "ldc-"));
     repoDir = mkdtempSync(join(tmpdir(), "repo-"));
-    originalEnv = process.env.LOCALDEVCONFIG_DIR;
-    process.env.LOCALDEVCONFIG_DIR = configDir;
+    originalEnv = process.env.VSYNC_BACKUP_DIR;
+    process.env.VSYNC_BACKUP_DIR = configDir;
   });
 
   afterEach(() => {
     rmSync(configDir, { recursive: true, force: true });
     rmSync(repoDir, { recursive: true, force: true });
-    if (originalEnv === undefined) delete process.env.LOCALDEVCONFIG_DIR;
-    else process.env.LOCALDEVCONFIG_DIR = originalEnv;
+    if (originalEnv === undefined) delete process.env.VSYNC_BACKUP_DIR;
+    else process.env.VSYNC_BACKUP_DIR = originalEnv;
   });
 
   test("returns null when no source paths exist", async () => {

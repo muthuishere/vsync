@@ -28,6 +28,7 @@ import { join } from "node:path";
 import { secrets } from "bun";
 
 const configFile: ConfigFile = {
+  version: 1,
   s3: {
     endpoint: "hel1.example.com",
     bucket: "b",
@@ -37,11 +38,10 @@ const configFile: ConfigFile = {
     secretAccessKey: "sec",
   },
   encryption: { salt: "long-enough-salt-string" },
-  files: { envFile: ".env.dev", vaultFolder: "infra/vault/dev" },
 };
 
 const envConfig: EnvConfig = {
-  ...configFile,
+  s3: configFile.s3,
   encryption: {
     key: "long-enough-key-for-validation-tests",
     salt: configFile.encryption.salt,

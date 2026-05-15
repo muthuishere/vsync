@@ -24,17 +24,26 @@ import { getKey } from "./keychain";
 
 export const MIN_KEY_LEN = 20;
 export const MIN_SALT_LEN = 16;
-export const EXPORT_BLOB_VERSION = 1;
+export const EXPORT_BLOB_VERSION = 2;
 
 /**
- * Runtime composite used by every push/pull code path. Identical shape
- * to the old env-var blob, but assembled from file + keychain.
+ * Runtime composite used by every push / pull / sync code path. Same
+ * shape as ConfigFile, with the keychain key spliced in.
  */
 export type EnvConfig = {
   s3: S3Credentials;
   encryption: { key: string; salt: string };
-  files: { envFile: string; vaultFolder: string };
+  files?: { vaultFolder?: string };
+  sync?: ConfigFile["sync"];
 };
+
+/**
+ * Resolve the effective vault folder for a (repo, env). Defaults to
+ * `infra/vault/<env>` when the per-repo file doesn't override.
+ */
+export function resolveVaultFolder(cfg: EnvConfig | ConfigFile, env: string): string {
+  return cfg.files?.vaultFolder ?? `infra/vault/${env.toLowerCase()}`;
+}
 
 /** Wire shape of the share blob exchanged between teammates. */
 export type ExportPayload = {
@@ -87,7 +96,8 @@ export async function loadEnvConfig(
   const composite: EnvConfig = {
     s3: cfg.s3,
     encryption: { key, salt: cfg.encryption.salt },
-    files: cfg.files,
+    ...(cfg.files !== undefined ? { files: cfg.files } : {}),
+    ...(cfg.sync !== undefined ? { sync: cfg.sync } : {}),
   };
   validate(composite);
   return composite;
@@ -137,9 +147,16 @@ export function validate(cfg: unknown): asserts cfg is EnvConfig {
       `encryption.salt must be at least ${MIN_SALT_LEN} characters (got ${enc.salt?.length ?? 0}).`,
     );
   }
-  const files = c?.files;
-  for (const k of ["envFile", "vaultFolder"] as const) {
-    if (!files?.[k]) throw new Error(`files.${k} missing`);
+  if (c.files !== undefined) {
+    if (typeof c.files !== "object" || c.files === null) {
+      throw new Error("files must be an object if present");
+    }
+    if (
+      c.files.vaultFolder !== undefined &&
+      typeof c.files.vaultFolder !== "string"
+    ) {
+      throw new Error("files.vaultFolder must be a string if present");
+    }
   }
 }
 

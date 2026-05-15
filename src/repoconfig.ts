@@ -16,14 +16,23 @@ import type { S3Credentials } from "./s3";
 import { vsyncBaseDir } from "./defaults";
 
 /**
- * On-disk shape. Same structure used by every push / pull / sync code
- * path — `loadEnvConfig` (envconfig.ts) just splices in the keychain key
- * to produce the runtime composite.
+ * On-disk shape. Self-contained — push / pull / sync read this file and
+ * the keychain entry, nothing else. `loadEnvConfig` (envconfig.ts) just
+ * splices in the keychain key.
+ *
+ * `files.vaultFolder` overrides the default `infra/vault/<env>` for
+ * monorepos. `sync.gh.repo` / `sync.gcp.project` are routing config
+ * for the `vsync sync` fanout, written on first invocation.
  */
 export type ConfigFile = {
+  version: 1;
   s3: S3Credentials;
   encryption: { salt: string };
-  files: { envFile: string; vaultFolder: string };
+  files?: { vaultFolder?: string };
+  sync?: {
+    gh?: { repo: string };
+    gcp?: { project: string };
+  };
 };
 
 /** Full path for a given (repo, env). env is lowercased; repo is taken as-is. */
@@ -110,7 +119,11 @@ export async function deleteConfigFile(
 /** Defensive shape check; mirrors validate() in envconfig.ts but key-free. */
 export function validateConfigFile(cfg: unknown): asserts cfg is ConfigFile {
   const c = cfg as Partial<ConfigFile> | null;
-  const s3 = c?.s3;
+  if (!c || typeof c !== "object") throw new Error("config: not an object");
+  if (c.version !== 1) {
+    throw new Error(`config: unsupported version ${c.version} (expected 1)`);
+  }
+  const s3 = c.s3;
   for (const k of [
     "endpoint",
     "region",
@@ -123,10 +136,28 @@ export function validateConfigFile(cfg: unknown): asserts cfg is ConfigFile {
   if (typeof s3?.useSsl !== "boolean") {
     throw new Error("config: s3.useSsl missing or not a boolean");
   }
-  const enc = c?.encryption;
+  const enc = c.encryption;
   if (!enc?.salt) throw new Error("config: encryption.salt missing");
-  const files = c?.files;
-  for (const k of ["envFile", "vaultFolder"] as const) {
-    if (!files?.[k]) throw new Error(`config: files.${k} missing`);
+  if (c.files !== undefined) {
+    if (typeof c.files !== "object" || c.files === null) {
+      throw new Error("config: files must be an object if present");
+    }
+    if (
+      c.files.vaultFolder !== undefined &&
+      typeof c.files.vaultFolder !== "string"
+    ) {
+      throw new Error("config: files.vaultFolder must be a string if present");
+    }
+  }
+  if (c.sync !== undefined) {
+    if (typeof c.sync !== "object" || c.sync === null) {
+      throw new Error("config: sync must be an object if present");
+    }
+    if (c.sync.gh !== undefined && (!c.sync.gh.repo || typeof c.sync.gh.repo !== "string")) {
+      throw new Error("config: sync.gh.repo must be a string if sync.gh is present");
+    }
+    if (c.sync.gcp !== undefined && (!c.sync.gcp.project || typeof c.sync.gcp.project !== "string")) {
+      throw new Error("config: sync.gcp.project must be a string if sync.gcp is present");
+    }
   }
 }

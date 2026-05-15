@@ -1,4 +1,4 @@
-// Local rolling backup at ~/.config/localdevconfig/<name>-<ts>.zip.enc.
+// Local rolling backup at ~/.config/vsync/backups/<name>-<ts>.zip.enc.
 // Keeps only the 2 most recent backups per name; older ones are pruned.
 //
 // Backups are encrypted with the same key+salt as the S3 bundle so a
@@ -6,17 +6,17 @@
 // expose decrypted secrets sitting on disk.
 
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { zipPaths } from "./archive";
 import { encrypt } from "./crypto";
+import { vsyncBaseDir } from "./defaults";
 
-export const BACKUP_DIR = join(homedir(), ".config", "localdevconfig");
 export const BACKUP_EXT = ".zip.enc";
 const KEEP = 2;
 
 export function backupDir(): string {
-  const dir = process.env.LOCALDEVCONFIG_DIR ?? BACKUP_DIR;
+  const dir = process.env.VSYNC_BACKUP_DIR ?? join(vsyncBaseDir(), "backups");
   mkdirSync(dir, { recursive: true });
   return dir;
 }
