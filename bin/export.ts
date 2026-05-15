@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
-// Usage: secret-lib export <env> [--repo=<name>] [--out=<path>] [--passphrase=<pp>] [--interactive]
+// Usage: vsync export <env> [--repo=<name>] [--out=<path>] [--passphrase=<pp>] [--interactive]
 //
-// Bundles the on-disk config file + the keychain-stored AES key into a
-// passphrase-encrypted file that's safe to send via any channel
-// (Slack/AirDrop/email — same envelope used by S3 pushes). The passphrase
-// is auto-generated if not supplied and printed to stdout for the user
-// to copy.
+// Bundles the on-disk per-repo config + the keychain-stored AES key into a
+// passphrase-encrypted .share file that's safe to send via any channel
+// (Slack DM, AirDrop, email — same envelope used by S3 pushes). The
+// passphrase is auto-generated if not supplied and printed to stdout for
+// the user to copy.
 //
 // Default output path: ./<repo>-<env>.share
 
@@ -24,7 +24,7 @@ export async function main(argv: string[]): Promise<void> {
   const { positional, flags } = parseArgs(argv);
   const env = positional[0];
   if (!env) {
-    console.error("usage: secret-lib export <env> [--repo=<name>] [--out=<path>] [--passphrase=<pp>]");
+    console.error("usage: vsync export <env> [--repo=<name>] [--out=<path>] [--passphrase=<pp>]");
     process.exit(1);
   }
   const interactive = flags.interactive === "true";
@@ -34,7 +34,7 @@ export async function main(argv: string[]): Promise<void> {
   if (!cfg) {
     console.error(
       `no config file for ${repo}/${env} at ${configFilePath(repo, env)}.\n` +
-        `Run 'secret-lib init ${env}' first, or 'secret-lib import ${env} <share-file>' if a teammate sent you one.`,
+        `Run 'vsync init ${env}' first, or 'vsync import ${env} <share-file>' if a teammate sent you one.`,
     );
     process.exit(1);
   }
@@ -42,7 +42,7 @@ export async function main(argv: string[]): Promise<void> {
   if (!key) {
     console.error(
       `encryption key for ${repo}/${env} not found in OS keychain.\n` +
-        `Either re-run 'secret-lib init ${env}' (generates a new key) or 'secret-lib link ${env} --key=<key>' (saves an existing one).`,
+        `Re-run 'vsync init ${env}' to generate a fresh one (will not match prior S3 bundles).`,
     );
     process.exit(1);
   }
@@ -84,7 +84,7 @@ export async function main(argv: string[]): Promise<void> {
   console.log("Send the file and the passphrase to your teammate on TWO different channels");
   console.log("(e.g. file via Slack DM, passphrase via SMS).\n");
   console.log("They will run:");
-  console.log(`  secret-lib import ${env} ${out.split("/").pop()}`);
+  console.log(`  vsync import ${env} ${out.split("/").pop()}`);
 }
 
 if (import.meta.main) {

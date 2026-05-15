@@ -1,12 +1,12 @@
 #!/usr/bin/env bun
-// Usage: secret-lib import <env> [<share-file>] [--repo=<name>] [--passphrase=<pp>] [--interactive]
+// Usage: vsync import <env> [<share-file>] [--repo=<name>] [--passphrase=<pp>] [--interactive]
 //
-// Reads the encrypted share file produced by `secret-lib export`, prompts
+// Reads the encrypted share file produced by `vsync export`, prompts
 // for (or accepts via flag) the passphrase, decrypts, and installs:
-//   - the config payload to ~/.config/deemwar/config/<repo>/env_<env>
-//   - the encryption key into the OS keychain (com.deemwar.secret-lib / repo/env)
+//   - the per-repo config to ~/.config/vsync/<repo>/env_<env>
+//   - the encryption key into the OS keychain (tools.vsync / <repo>/<env>)
 //
-// After import you're ready to `secret-lib push <env>` / `pull <env>`.
+// After import you're ready to `vsync pull <env>` / `push <env>`.
 
 import { parseArgs } from "../src/argv";
 import { getRepoName } from "../src/repo";
@@ -23,7 +23,7 @@ export async function main(argv: string[]): Promise<void> {
   let filePath = positional[1] ?? flags.file;
   if (!env) {
     console.error(
-      "usage: secret-lib import <env> [<share-file>] [--repo=<name>] [--passphrase=<pp>]",
+      "usage: vsync import <env> [<share-file>] [--repo=<name>] [--passphrase=<pp>]",
     );
     process.exit(1);
   }
@@ -88,10 +88,10 @@ export async function main(argv: string[]): Promise<void> {
   console.log("─────────────────────────────────────────────────────────────\n");
   console.log(`  config file: ${saved}`);
   console.log(
-    `  key:         OS keychain (service=com.deemwar.secret-lib, account=${repo}/${env})\n`,
+    `  key:         OS keychain (service=tools.vsync, account=${repo}/${env})\n`,
   );
   console.log("Next step:");
-  console.log(`  secret-lib pull ${env}   # download the latest .env + vault from S3`);
+  console.log(`  vsync pull ${env}   # download the latest vault folder from S3`);
   console.log("");
   console.log("You can safely delete the .share file now — its contents are installed.");
   // Silence "unused var" linters from finalEnv assignment kept for clarity.
