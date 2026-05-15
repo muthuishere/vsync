@@ -1,17 +1,17 @@
 #!/usr/bin/env bun
-// Usage: secret-lib pull <env> [--repo=<name>]
+// Usage: vsync pull <env> [--repo=<name>]
 //
-// Reads the config file + keychain key, backs up any existing local
-// .env/vault, downloads the latest encrypted bundle from S3, verifies
-// the embedded manifest timestamp matches the `latest` pointer, decrypts,
-// and unpacks into the repo root — replacing local files.
+// Reads the per-(repo, env) config + keychain key, backs up the current
+// vault folder if any, downloads the latest encrypted bundle from S3,
+// verifies the embedded manifest timestamp matches the `latest` pointer,
+// decrypts, and unpacks into the resolved vault folder.
 
 import { existsSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "../src/argv";
 import { getRepoName, getRepoRoot } from "../src/repo";
-import { loadEnvConfig } from "../src/envconfig";
+import { loadEnvConfig, resolveVaultFolder } from "../src/envconfig";
 import { unzipTo } from "../src/archive";
 import { decrypt } from "../src/crypto";
 import { unwrap } from "../src/manifest";
@@ -22,7 +22,7 @@ export async function main(argv: string[]): Promise<void> {
   const { positional, flags } = parseArgs(argv);
   const env = positional[0];
   if (!env) {
-    console.error("usage: secret-lib pull <env> [--repo=<name>]");
+    console.error("usage: vsync pull <env> [--repo=<name>]");
     process.exit(1);
   }
   const repo = await getRepoName({ override: flags.repo });
@@ -35,18 +35,14 @@ export async function main(argv: string[]): Promise<void> {
     process.exit(1);
   }
   const root = await getRepoRoot();
+  const vaultFolder = resolveVaultFolder(cfg, env);
 
   const prefixKey = `${env.toLowerCase()}/`;
   const pointerKey = `${prefixKey}latest`;
   const client = makeClient(cfg.s3);
 
-  console.log(`[1/6] backing up local files (if any)`);
-  const backup = await makeBackup(
-    env,
-    root,
-    [cfg.files.envFile, cfg.files.vaultFolder],
-    cfg.encryption,
-  );
+  console.log(`[1/6] backing up local ${vaultFolder}/ (if any)`);
+  const backup = await makeBackup(env, root, [vaultFolder], cfg.encryption);
   if (backup) {
     console.log(`      → ${backup}`);
   } else {
@@ -57,7 +53,7 @@ export async function main(argv: string[]): Promise<void> {
   const remoteTs = (await client.file(pointerKey).text()).trim();
   if (!remoteTs) {
     console.error(
-      `pointer is empty — secret-lib push ${env} first to seed s3://${cfg.s3.bucket}/${prefixKey}`,
+      `pointer is empty — vsync push ${env} first to seed s3://${cfg.s3.bucket}/${prefixKey}`,
     );
     process.exit(1);
   }

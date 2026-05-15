@@ -1,16 +1,17 @@
 #!/usr/bin/env bun
-// Usage: secret-lib push <env> [--repo=<name>]
+// Usage: vsync push <env> [--repo=<name>]
 //
-// Reads the local .env + vault folder named in the config file, encrypts
-// with the keychain-stored AES key, and uploads versioned + pointer-sealed
-// bundles to S3. See pull.ts for the inverse.
+// Reads the per-(repo, env) config + keychain key, zips the resolved
+// vault folder (cfg.files.vaultFolder ?? infra/vault/<env>), encrypts
+// with the keychain-stored AES key, and uploads versioned + pointer-
+// sealed bundles to S3. See pull.ts for the inverse.
 
 import { existsSync, statSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "../src/argv";
 import { getRepoName, getRepoRoot } from "../src/repo";
-import { loadEnvConfig } from "../src/envconfig";
+import { loadEnvConfig, resolveVaultFolder } from "../src/envconfig";
 import { zipPaths } from "../src/archive";
 import { encrypt } from "../src/crypto";
 import { wrap } from "../src/manifest";
@@ -21,7 +22,7 @@ export async function main(argv: string[]): Promise<void> {
   const { positional, flags } = parseArgs(argv);
   const env = positional[0];
   if (!env) {
-    console.error("usage: secret-lib push <env> [--repo=<name>]");
+    console.error("usage: vsync push <env> [--repo=<name>]");
     process.exit(1);
   }
   const repo = await getRepoName({ override: flags.repo });
@@ -35,13 +36,13 @@ export async function main(argv: string[]): Promise<void> {
   }
   const root = await getRepoRoot();
 
-  const { envFile, vaultFolder } = cfg.files;
-  if (!existsSync(join(root, envFile))) {
-    console.error(`env file not found: ${join(root, envFile)}`);
-    process.exit(1);
-  }
-  if (!existsSync(join(root, vaultFolder)) || !statSync(join(root, vaultFolder)).isDirectory()) {
-    console.error(`vault folder not found: ${join(root, vaultFolder)}`);
+  const vaultFolder = resolveVaultFolder(cfg, env);
+  const absVault = join(root, vaultFolder);
+  if (!existsSync(absVault) || !statSync(absVault).isDirectory()) {
+    console.error(
+      `vault folder not found: ${absVault}\n` +
+        `Create it and put your secrets inside (e.g. ${vaultFolder}/.env.${env}).`,
+    );
     process.exit(1);
   }
 
@@ -56,8 +57,8 @@ export async function main(argv: string[]): Promise<void> {
   );
 
   try {
-    console.log(`[1/5] zipping ${envFile} + ${vaultFolder}/`);
-    await zipPaths(root, [envFile, vaultFolder], tmpZip);
+    console.log(`[1/5] zipping ${vaultFolder}/`);
+    await zipPaths(root, [vaultFolder], tmpZip);
 
     console.log(`[2/5] sealing manifest ts=${ts}`);
     const zipBytes = await Bun.file(tmpZip).bytes();
