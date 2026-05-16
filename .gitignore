@@ -1,6 +1,10 @@
 node_modules/
 *.log
 
+# VitePress build output + cache (docs site)
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+
 # `vsync use` creates a symlink here; never commit it.
 .env
 

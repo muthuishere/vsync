@@ -12,7 +12,10 @@
     "README.md"
   ],
   "scripts": {
-    "test": "bun test"
+    "test": "bun test",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "keywords": [
     "secrets",
@@ -41,6 +44,7 @@
   },
   "license": "MIT",
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "vitepress": "^1.6.4"
   }
 }

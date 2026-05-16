@@ -2,7 +2,7 @@
 
 **One encrypted vault for your environment secrets, shared across your team, mirrored to GitHub & GCP, audited every time someone touches it.**
 
-![vsync flow](docs/vsync-flow.png)
+![vsync flow](docs/public/vsync-flow.png)
 
 A `.env` file is the friendliest thing in your repo: one line per secret, edited by hand, loaded by every framework. It's also the worst thing in your repo — passed around on Slack, copy-pasted into the wrong window, never the same on any two laptops, **never encrypted, never versioned, never auditable**. The moment one teammate's secrets drift from another's, you stop trusting `.env` and start emailing JSON files.
 
