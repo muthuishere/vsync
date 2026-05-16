@@ -1,17 +1,16 @@
 import { defineConfig } from "vitepress";
 
 export default defineConfig({
-  title: "vsync",
+  title: "Vsync",
+  titleTemplate: ":title — Vsync",
   description:
     "One encrypted vault for your environment secrets, shared across your team, mirrored to GitHub & GCP, audited every time someone touches it.",
   base: "/vsync/",
   cleanUrls: true,
   lastUpdated: true,
-  head: [["link", { rel: "icon", href: "/vsync/favicon.svg" }]],
 
   themeConfig: {
-    logo: "/vsync-flow.png",
-    siteTitle: "vsync",
+    siteTitle: "Vsync",
 
     nav: [
       { text: "Guide", link: "/guide/quickstart" },

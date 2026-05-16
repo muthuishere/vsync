@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: vsync
+  name: Vsync
   text: Secrets your team actually shares.
   tagline: One encrypted vault for your environment secrets — shared across your team, mirrored to GitHub & GCP, audited every time someone touches it.
   image:
