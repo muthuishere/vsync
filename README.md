@@ -16,10 +16,11 @@ vsync keeps the `.env` you already write, and turns it into a real vault:
 - **Per-machine key in the OS keychain.** `Bun.secrets` — macOS Keychain, Linux libsecret, Windows Credential Manager. The S3 bucket alone is useless; the key alone is useless. Both halves required to decrypt.
 
 ```bash
-bunx @muthuishere/vsync --help
+bun  install -g @muthuishere/vsync     # or:  npm install -g @muthuishere/vsync
+vsync --help
 ```
 
-Run via `bunx`. No install, no shell-rc edits, no giant base64 blob in `~/.zshrc`.
+One global install, then `vsync` is on PATH. No shell-rc edits, no giant base64 blob in `~/.zshrc`. (Allergic to global installs? `bunx @muthuishere/vsync <subcommand>` works too — same code path, slower invocation.)
 
 ---
 
@@ -103,13 +104,16 @@ A `.share` file bundles **both halves** under one passphrase. Sent on a differen
 
 ## Install
 
-You don't. Run via `bunx`:
-
 ```bash
-bunx @muthuishere/vsync <subcommand>
+bun install -g @muthuishere/vsync     # or:  npm install -g @muthuishere/vsync
+vsync --help
 ```
 
-Requires Bun ≥ 1.2.21 (for `Bun.secrets`). For local development of vsync itself:
+Requires Bun ≥ 1.2.21 on PATH (for `Bun.secrets`) — the shebang is `#!/usr/bin/env bun`, so `bun` must be installed even if you used `npm install -g` for the package itself. Most users have Bun anyway; if not, see [bun.sh](https://bun.sh).
+
+Don't want to install? `bunx @muthuishere/vsync <subcommand>` runs the same code from npm cache each time — fine for trying it out, slower for daily use.
+
+For local development of vsync itself:
 
 ```bash
 git clone git@github.com:muthuishere/vsync.git
@@ -125,14 +129,14 @@ bun test
 ```bash
 # 1. Generate the per-(repo, env) key + config. First-ever invocation prompts
 #    for S3 creds; subsequent inits pre-fill from ~/.config/vsync/defaults.
-bunx @muthuishere/vsync init dev
+vsync init dev
 
 # 2. Put your secrets under infra/vault/dev/ and push.
 echo "DATABASE_URL=postgres://..." > infra/vault/dev/.env.dev
-bunx @muthuishere/vsync push dev
+vsync push dev
 
 # 3. Hand the team a share file + passphrase (different channels).
-bunx @muthuishere/vsync export dev
+vsync export dev
 ```
 
 For an onboarding cheat sheet to drop into your repo (so teammates and AI agents know vsync exists), run `vsync docs > infra/AGENTS.md`. Plain stdout — pipe it wherever you want.
@@ -144,11 +148,11 @@ cd <cloned-repo>
 
 # 1. Import the share file your teammate sent (carries S3 creds + key).
 #    No prior `init` required on this machine.
-bunx @muthuishere/vsync import dev ./reqsume-dev.share
+vsync import dev ./reqsume-dev.share
 # Passphrase: <paste>
 
 # 2. Pull the encrypted bundle.
-bunx @muthuishere/vsync pull dev
+vsync pull dev
 ```
 
 After step 2, `infra/vault/dev/` is populated and the encryption key is in your keychain.
@@ -157,18 +161,18 @@ After step 2, `infra/vault/dev/` is populated and the encryption key is in your 
 
 ```bash
 # I edited infra/vault/dev/.env.dev locally:
-bunx @muthuishere/vsync push dev
+vsync push dev
 
 # Get the latest from S3:
-bunx @muthuishere/vsync pull dev
+vsync pull dev
 
 # See what versions exist on S3:
-bunx @muthuishere/vsync versions dev
+vsync versions dev
 
 # Push secrets out to GitHub / GCP:
-bunx @muthuishere/vsync sync dev gh
-bunx @muthuishere/vsync sync dev gcp
-bunx @muthuishere/vsync sync dev all
+vsync sync dev gh
+vsync sync dev gcp
+vsync sync dev all
 ```
 
 `pull` makes a local backup at `~/.config/vsync/backups/<env>-<ts>.zip.enc` before overwriting (two-deep rolling buffer). See "Recovering a local backup" below if you ever need one.
