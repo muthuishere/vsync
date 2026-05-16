@@ -37,6 +37,12 @@ features:
     details: '`vsync use <env>` symlinks `./.env` at the vault''s env file. Apps just work. Switch envs with one command; restart the dev server.'
 ---
 
+<div style="max-width: 1100px; margin: 2.5rem auto 3rem; padding: 0 1rem;">
+
+![How vsync flows: owner vault → push → S3/MinIO with audit.csv → pull → teammate vault, with `./.env` symlinks underneath and `vsync sync` fanning out to GitHub / GCP.](/vsync-flow.png)
+
+</div>
+
 ## Install
 
 ```bash
