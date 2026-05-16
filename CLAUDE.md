@@ -4,18 +4,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`@muthuishere/secret-lib` — a Bun-native CLI (`bunx @muthuishere/secret-lib`) that syncs an encrypted `.env` + vault folder between teammates via an S3-compatible bucket. v0.2.0 is a clean break from the v0.1.x env-var-blob model.
+`@muthuishere/vsync` — a Bun-native CLI that syncs an encrypted vault folder (`.env`, JSON keys, certs, anything) between teammates via an S3-compatible bucket, with an append-only audit log on the bucket and a `vsync use` symlink so apps just `dotenv.config()`. Install globally (`bun install -g @muthuishere/vsync` or `npm install -g …`) and invoke as `vsync`; or run via `bunx @muthuishere/vsync`.
 
-Full design rationale and threat model live in `SPEC.md`. Onboarding/usage flow lives in `onboarding.md` + `using.md`. Don't duplicate them here — read them when context is missing.
+Design specs live in `docs/specs/`:
+
+- [`v0.2-secret-lib.md`](docs/specs/v0.2-secret-lib.md) — original full spec (threat model, crypto envelope, repo-name resolution). Still the source of truth for anything not changed since.
+- [`v0.3-vsync-rebrand.md`](docs/specs/v0.3-vsync-rebrand.md) — rename + opinionated layout (vault folder at `infra/vault/<env>/`) + `sync` verb for GitHub/GCP fanout. Historical doc describing the rename from the original package name.
+- [`v0.4-audit-log.md`](docs/specs/v0.4-audit-log.md) — append-only `audit.csv` on S3, ETag-conditional protocol, expandable `meta` JSON cell.
+
+Don't duplicate spec content here — read the spec when context is missing.
 
 ## Common commands
 
 ```bash
 bun install                # one-time
-bun test                   # all tests (114 today)
+bun test                   # all tests (184 today)
 bun test test/repo.test.ts # single file
 bun test --watch           # watch mode
-./bin/secret-lib.ts <sub>  # run the CLI directly (no install needed)
+./bin/vsync.ts <sub>       # run the CLI directly (no install needed)
 bunx . <subcommand>        # run as if installed
 ```
 
@@ -32,7 +38,7 @@ Every (repo, env) pair has **two persistent halves** that must both be present f
 
 `src/envconfig.ts::loadEnvConfig(repo, env)` is the single read-path that joins them into a runtime `EnvConfig`. If you're adding a subcommand that needs S3 creds + the key, call this — don't reinvent the load. Missing file → `ConfigFileMissingError`; missing key → `KeyMissingError`. Both errors carry user-actionable next-step messages (init / import / link); preserve that pattern when adding new failure modes.
 
-The library **never reads or writes shell rc**, never asks the user to export an env var, never prints an `export …` line. This is intentional — see SPEC.md §1 for the incident that motivated it. Don't reintroduce env-var-blob paths.
+The library **never reads or writes shell rc**, never asks the user to export an env var, never prints an `export …` line. This is intentional — see docs/specs/v0.2-secret-lib.md §1 for the incident that motivated it. Don't reintroduce env-var-blob paths.
 
 ## Repo identity (`src/repo.ts`)
 
@@ -42,12 +48,12 @@ The `<repo>` namespace used in paths and keychain accounts is resolved by a prec
 
 Result is sanitised to `[A-Za-z0-9._-]+`. Stability of this chain matters — if you change it, an already-initialised user's keychain and config file silently move.
 
-## CLI dispatch (`bin/secret-lib.ts`)
+## CLI dispatch (`bin/vsync.ts`)
 
 Single dispatcher; each subcommand is a sibling file exporting `main(argv: string[])`. To add a subcommand:
 
 1. New file in `bin/` exporting `main`
-2. Add to the `SUBCOMMANDS` const + the `switch` in `bin/secret-lib.ts`
+2. Add to the `SUBCOMMANDS` const + the `switch` in `bin/vsync.ts`
 3. Update the `usage()` text in the same file
 4. Update `README.md` cheat-sheet + `package.json::files` if needed
 
@@ -75,9 +81,9 @@ Bumping any magic = breaks every existing deployment. Don't touch unless you als
 
 ## What's intentionally out of scope
 
-Don't add (per SPEC.md §2 + §10):
-- Cross-platform GUI, audit logging, per-user ACLs
+Don't add:
+- Cross-platform GUI, per-user ACLs (audit log shipped in v0.4 — see `docs/specs/v0.4-audit-log.md`)
 - Per-file passphrase on the disk config (the security envelope is `chmod 0600` + the keychain split)
-- Compat shims for v0.1.x env-var blobs — explicitly deleted
+- Compat shims for env-var-blob shell-rc setups — never reintroduce
 
-`rotate-key`, `doctor`, `list` are on the 0.3.x roadmap (SPEC.md §10) but not implemented; if the user asks for them, point at the spec rather than improvising.
+`rotate-key`, `doctor`, `list` were on an earlier roadmap but are not implemented; if the user asks for them, surface that and discuss scope rather than improvising.

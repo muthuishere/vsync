@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 function mkTmpRoot(): string {
-  return mkdtempSync(join(tmpdir(), "secret-lib-repo-"));
+  return mkdtempSync(join(tmpdir(), "vsync-repo-"));
 }
 
 describe("getRepoName precedence", () => {
@@ -52,8 +52,8 @@ describe("getRepoName precedence", () => {
     const root = mkTmpRoot();
     // no package.json
     const name = await getRepoName({ root });
-    // root is /tmp/secret-lib-repo-XXXX → basename starts with secret-lib-repo
-    expect(name).toMatch(/^secret-lib-repo-/);
+    // root is /tmp/vsync-repo-XXXX → basename starts with vsync-repo
+    expect(name).toMatch(/^vsync-repo-/);
   });
 
   test("sanitizes weird characters", async () => {
@@ -74,6 +74,6 @@ describe("getRepoName precedence", () => {
     const root = mkTmpRoot();
     writeFileSync(join(root, "package.json"), "not valid json {{{");
     const name = await getRepoName({ root });
-    expect(name).toMatch(/^secret-lib-repo-/);
+    expect(name).toMatch(/^vsync-repo-/);
   });
 });

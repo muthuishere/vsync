@@ -303,19 +303,13 @@ In practice, just don't lose the keychain entry. `pull` itself is the recovery p
 
 ## Versioning
 
-This is **0.4.0** — adds an append-only audit log at `s3://<bucket>/<repo>/<env>/audit.csv` and the `vsync audit` viewer. Fully additive over 0.3.x: no wire-format break, no config migration. Old clients ignore `audit.csv`; new clients tolerate its absence.
+| Release | What's in it |
+|---|---|
+| **0.5.0** | `vsync use <env>` — symlinks `./.env` (or `--link=<path>`) at the vault's env file so `dotenv.config()` just works; switch envs with one command. README rewrite + flow diagram. |
+| 0.4.0 | Append-only audit log at `s3://<bucket>/<repo>/<env>/audit.csv` + `vsync audit` viewer. Expandable `meta` JSON cell via `--note` / `--meta` + matching env vars. |
+| 0.3.0 | Opinionated layout: vault folder at `infra/vault/<env>/` with `--vault-folder` override; self-contained per-(repo, env) config; `vsync sync` for GitHub / GCP fanout. |
 
-0.3.0 was the rebrand from `@muthuishere/secret-lib` 0.2.x — new package name, new bin (`vsync`), new keychain service (`tools.vsync`), new config root (`~/.config/vsync/`), new vault layout (`infra/vault/<env>/.env.<env>`). The crypto envelope (`RQE1`) is unchanged.
-
-0.3.x and later do not auto-migrate from 0.2.x. The supported upgrade path is to re-`init` from scratch:
-
-```bash
-vsync init dev          # auto-relocates root .env.dev if it exists
-vsync push dev
-vsync export dev        # re-share with team
-```
-
-Any leftover 0.2.x on-disk config tree and keychain entries can be deleted; nothing in 0.3.x reads them. `@muthuishere/secret-lib` 0.2.x stays on npm for users who can't migrate.
+All 0.x releases are wire-compatible with each other on the S3 bundle envelope (`RQE1`) and manifest seal (`RQEM0001`). New clients tolerate the absence of features added in later versions; old clients ignore new objects (like `audit.csv`) on the bucket.
 
 ---
 

@@ -133,12 +133,12 @@ describe("export blob round-trip", () => {
 describe("loadEnvConfig (file + keychain integration)", () => {
   let tmpRoot: string;
   let prevXdg: string | undefined;
-  const REPO = "secret-lib-tests";
+  const REPO = "vsync-tests";
   const ENV = "dev";
   const TEST_KEY = "test-only-key-for-load-config-checks";
 
   beforeAll(() => {
-    tmpRoot = mkdtempSync(join(tmpdir(), "secret-lib-envconfig-"));
+    tmpRoot = mkdtempSync(join(tmpdir(), "vsync-envconfig-"));
     prevXdg = process.env.XDG_CONFIG_HOME;
     process.env.XDG_CONFIG_HOME = tmpRoot;
   });
