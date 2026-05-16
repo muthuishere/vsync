@@ -1,6 +1,6 @@
 # vsync
 
-**Your `.env` files — kept as simple, made as safe as a vault.**
+**One encrypted vault for your environment secrets, shared across your team, mirrored to GitHub & GCP, audited every time someone touches it.**
 
 ![vsync flow](docs/vsync-flow.png)
 
