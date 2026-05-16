@@ -73,6 +73,33 @@ plus the salt from the per-repo config. To decrypt by hand:
 
 Easier: just \`vsync pull\` again to restore from S3.
 
+## Audit log
+
+Every \`pull\`, \`push\`, \`import\`, and \`export\` appends a CSV row to
+\`s3://<bucket>/<repo>/<env>/audit.csv\` capturing timestamp, action,
+hostname, local IP, OS user, git email, and a free-form \`meta\` JSON
+cell. Best-effort: an audit-write failure prints a warning and never
+fails the parent command.
+
+On by default. Three ways to opt out:
+
+- \`--no-audit\` on a single invocation
+- \`cfg.audit.enabled: false\` in the per-repo config
+- \`vsync init <env> --audit=off\` at setup (or pick "off" at the first-time prompt)
+
+Tag a row with context via four merging input paths, in increasing
+priority order: \`$VSYNC_AUDIT_META\` (JSON) < \`$VSYNC_AUDIT_NOTE\` <
+\`--meta key=value\` (repeatable) < \`--note=<text>\`. Later sources
+overwrite same-named keys from earlier ones.
+
+View the log with \`vsync audit <env>\` (\`--limit=N\`, \`--all\`, \`--csv\`).
+Pretty table by default, newest first; \`--csv\` is raw passthrough.
+
+Honesty clause: transparency for honest users, not tamper-proof
+(anyone with bucket write can rewrite the file). It can't recover
+already-pulled secrets either — once a teammate has pulled, they hold
+a local copy.
+
 ## Rules for AI agents working in this repo
 
 1. **Never commit anything under \`infra/vault/\`.** Add it to

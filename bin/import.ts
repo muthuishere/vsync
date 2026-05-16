@@ -10,15 +10,21 @@
 
 import { parseArgs } from "../src/argv";
 import { getRepoName } from "../src/repo";
-import { saveConfigFile, configFilePath } from "../src/repoconfig";
+import { saveConfigFile, configFilePath, DEFAULT_AUDIT_ENABLED } from "../src/repoconfig";
 import { setKey } from "../src/keychain";
 import { parseShareFile } from "../src/sharefile";
 import { askText, askSecret, isTty } from "../src/prompt";
+import {
+  appendAuditRow,
+  buildMeta,
+  gatherRowMetadata,
+  makeAuditClient,
+} from "../src/audit";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 export async function main(argv: string[]): Promise<void> {
-  const { positional, flags } = parseArgs(argv);
+  const { positional, flags, lists } = parseArgs(argv);
   const env = positional[0];
   let filePath = positional[1] ?? flags.file;
   if (!env) {
@@ -96,6 +102,50 @@ export async function main(argv: string[]): Promise<void> {
   console.log("You can safely delete the .share file now — its contents are installed.");
   // Silence "unused var" linters from finalEnv assignment kept for clarity.
   void finalEnv;
+
+  await tryAppendAudit(payload.config.s3, payload.config.audit?.enabled, flags, lists, repo, env);
+}
+
+/**
+ * Best-effort audit append. Honours both the per-(repo, env) opt-out
+ * (`cfg.audit.enabled === false`) and the per-invocation `--no-audit`
+ * flag. Any throw from the append path is downgraded to a stderr warning
+ * so the parent command's exit code is unaffected.
+ */
+async function tryAppendAudit(
+  s3: Parameters<typeof makeAuditClient>[0],
+  enabled: boolean | undefined,
+  flags: Record<string, string>,
+  lists: Record<string, string[]>,
+  repo: string,
+  env: string,
+): Promise<void> {
+  if (flags["no-audit"] === "true") return;
+  const on = enabled ?? DEFAULT_AUDIT_ENABLED;
+  if (!on) return;
+
+  let meta;
+  try {
+    meta = buildMeta({
+      envMeta: process.env.VSYNC_AUDIT_META,
+      envNote: process.env.VSYNC_AUDIT_NOTE,
+      flagMetaList: lists.meta,
+      flagNote: flags.note,
+    });
+  } catch (e) {
+    console.error((e as Error).message);
+    process.exit(1);
+  }
+  for (const w of meta.warnings) console.error(w);
+
+  try {
+    const row = await gatherRowMetadata("import", "");
+    row.meta = meta.json;
+    const client = makeAuditClient(s3);
+    await appendAuditRow(client, repo, env, row);
+  } catch (e) {
+    console.error(`warning: failed to record audit entry: ${(e as Error).message}`);
+  }
 }
 
 if (import.meta.main) {

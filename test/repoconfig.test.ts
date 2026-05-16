@@ -76,7 +76,11 @@ describe("save / load roundtrip", () => {
   test("save writes gzipped JSON; load parses it back", async () => {
     const path = await saveConfigFile("acme", "dev", sample);
     expect(existsSync(path)).toBe(true);
-    expect(await loadConfigFile("acme", "dev")).toEqual(sample);
+    // `audit` defaults to { enabled: true } when absent on disk (spec §9).
+    expect(await loadConfigFile("acme", "dev")).toEqual({
+      ...sample,
+      audit: { enabled: true },
+    });
   });
 
   test("file has 0600 mode", async () => {
@@ -164,5 +168,46 @@ describe("validateConfigFile", () => {
   test("rejects sync.gcp missing project string", () => {
     const bad = { ...structuredClone(sample), sync: { gcp: { project: "" } } } as any;
     expect(() => validateConfigFile(bad)).toThrow(/sync\.gcp\.project/);
+  });
+
+  test("accepts an audit block with enabled boolean", () => {
+    const good = { ...structuredClone(sample), audit: { enabled: false } };
+    expect(() => validateConfigFile(good)).not.toThrow();
+  });
+
+  test("rejects audit.enabled if not a boolean", () => {
+    const bad = { ...structuredClone(sample), audit: { enabled: "yes" } } as any;
+    expect(() => validateConfigFile(bad)).toThrow(/audit\.enabled/);
+  });
+
+  test("rejects audit if not an object", () => {
+    const bad = { ...structuredClone(sample), audit: 42 } as any;
+    expect(() => validateConfigFile(bad)).toThrow(/audit/);
+  });
+});
+
+describe("audit block round-trip", () => {
+  beforeEach(() => {
+    rmSync(join(tmpRoot, "vsync"), { recursive: true, force: true });
+  });
+
+  test("defaults to { enabled: true } when absent on disk", async () => {
+    await saveConfigFile("acme", "dev", sample); // sample has no `audit`
+    const loaded = await loadConfigFile("acme", "dev");
+    expect(loaded?.audit).toEqual({ enabled: true });
+  });
+
+  test("explicit { enabled: false } round-trips through save/load", async () => {
+    const cfg: ConfigFile = { ...sample, audit: { enabled: false } };
+    await saveConfigFile("acme", "dev", cfg);
+    const loaded = await loadConfigFile("acme", "dev");
+    expect(loaded?.audit).toEqual({ enabled: false });
+  });
+
+  test("explicit { enabled: true } round-trips through save/load", async () => {
+    const cfg: ConfigFile = { ...sample, audit: { enabled: true } };
+    await saveConfigFile("acme", "dev", cfg);
+    const loaded = await loadConfigFile("acme", "dev");
+    expect(loaded?.audit).toEqual({ enabled: true });
   });
 });

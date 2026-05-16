@@ -11,17 +11,23 @@
 
 import { parseArgs } from "../src/argv";
 import { getRepoName } from "../src/repo";
-import { loadConfigFile, configFilePath } from "../src/repoconfig";
+import { loadConfigFile, configFilePath, DEFAULT_AUDIT_ENABLED } from "../src/repoconfig";
 import { getKey } from "../src/keychain";
 import { EXPORT_BLOB_VERSION, type ExportPayload } from "../src/envconfig";
 import { buildShareFile } from "../src/sharefile";
 import { generatePassphrase } from "../src/passphrase";
 import { askText, isTty } from "../src/prompt";
+import {
+  appendAuditRow,
+  buildMeta,
+  gatherRowMetadata,
+  makeAuditClient,
+} from "../src/audit";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 export async function main(argv: string[]): Promise<void> {
-  const { positional, flags } = parseArgs(argv);
+  const { positional, flags, lists } = parseArgs(argv);
   const env = positional[0];
   if (!env) {
     console.error("usage: vsync export <env> [--repo=<name>] [--out=<path>] [--passphrase=<pp>]");
@@ -85,6 +91,50 @@ export async function main(argv: string[]): Promise<void> {
   console.log("(e.g. file via Slack DM, passphrase via SMS).\n");
   console.log("They will run:");
   console.log(`  vsync import ${env} ${out.split("/").pop()}`);
+
+  await tryAppendAudit(cfg.s3, cfg.audit?.enabled, flags, lists, repo, env);
+}
+
+/**
+ * Best-effort audit append. Honours both the per-(repo, env) opt-out
+ * (`cfg.audit.enabled === false`) and the per-invocation `--no-audit`
+ * flag. Any throw from the append path is downgraded to a stderr warning
+ * so the parent command's exit code is unaffected.
+ */
+async function tryAppendAudit(
+  s3: Parameters<typeof makeAuditClient>[0],
+  enabled: boolean | undefined,
+  flags: Record<string, string>,
+  lists: Record<string, string[]>,
+  repo: string,
+  env: string,
+): Promise<void> {
+  if (flags["no-audit"] === "true") return;
+  const on = enabled ?? DEFAULT_AUDIT_ENABLED;
+  if (!on) return;
+
+  let meta;
+  try {
+    meta = buildMeta({
+      envMeta: process.env.VSYNC_AUDIT_META,
+      envNote: process.env.VSYNC_AUDIT_NOTE,
+      flagMetaList: lists.meta,
+      flagNote: flags.note,
+    });
+  } catch (e) {
+    console.error((e as Error).message);
+    process.exit(1);
+  }
+  for (const w of meta.warnings) console.error(w);
+
+  try {
+    const row = await gatherRowMetadata("export", "");
+    row.meta = meta.json;
+    const client = makeAuditClient(s3);
+    await appendAuditRow(client, repo, env, row);
+  } catch (e) {
+    console.error(`warning: failed to record audit entry: ${(e as Error).message}`);
+  }
 }
 
 if (import.meta.main) {

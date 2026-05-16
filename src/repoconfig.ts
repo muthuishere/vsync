@@ -33,7 +33,14 @@ export type ConfigFile = {
     gh?: { repo: string };
     gcp?: { project: string };
   };
+  // Optional audit-log block. Absent on disk → defaults to `{ enabled: true }`
+  // (audit is on by default — see SPEC-v0.4 §9). Explicit `{ enabled: false }`
+  // round-trips through save/load unchanged.
+  audit?: { enabled: boolean };
 };
+
+/** Per-(repo, env) audit preference, defaulted. Source of truth for callers. */
+export const DEFAULT_AUDIT_ENABLED = true;
 
 /** Full path for a given (repo, env). env is lowercased; repo is taken as-is. */
 export function configFilePath(repo: string, env: string): string {
@@ -95,6 +102,10 @@ export async function loadConfigFile(
   const json = gunzipSync(buf).toString("utf8");
   const parsed = JSON.parse(json);
   validateConfigFile(parsed);
+  // Default-on for `audit` — absent block means "enabled" per spec §9.
+  if (parsed.audit === undefined) {
+    parsed.audit = { enabled: DEFAULT_AUDIT_ENABLED };
+  }
   return parsed;
 }
 
@@ -158,6 +169,14 @@ export function validateConfigFile(cfg: unknown): asserts cfg is ConfigFile {
     }
     if (c.sync.gcp !== undefined && (!c.sync.gcp.project || typeof c.sync.gcp.project !== "string")) {
       throw new Error("config: sync.gcp.project must be a string if sync.gcp is present");
+    }
+  }
+  if (c.audit !== undefined) {
+    if (typeof c.audit !== "object" || c.audit === null) {
+      throw new Error("config: audit must be an object if present");
+    }
+    if (typeof c.audit.enabled !== "boolean") {
+      throw new Error("config: audit.enabled must be a boolean");
     }
   }
 }
