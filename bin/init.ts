@@ -30,6 +30,8 @@
 //   --vault-folder=<path>    Override default infra/vault/<env> for monorepos
 //   --migrate-from=<path>    Use a non-default source for the .env relocation
 //   --no-migrate             Skip the root .env.<env> migration prompt entirely
+//   --audit=on|off           Enable/disable the per-(repo, env) audit log
+//                            (default on; prompted interactively when unset)
 //   --interactive            Prompt even for fields already provided via flags
 
 import { existsSync, mkdirSync, renameSync, readFileSync } from "node:fs";
@@ -39,6 +41,7 @@ import { getRepoName, getRepoRoot } from "../src/repo";
 import {
   saveConfigFile,
   configFilePath,
+  DEFAULT_AUDIT_ENABLED,
   type ConfigFile,
 } from "../src/repoconfig";
 import { setKey, generateKey } from "../src/keychain";
@@ -71,6 +74,14 @@ function randomSalt(): string {
   const bytes = new Uint8Array(18);
   crypto.getRandomValues(bytes);
   return Buffer.from(bytes).toString("base64").replace(/=+$/, "");
+}
+
+function parseOnOff(raw: string, label: string): boolean {
+  const v = raw.toLowerCase();
+  if (v === "on" || v === "true" || v === "yes" || v === "1") return true;
+  if (v === "off" || v === "false" || v === "no" || v === "0") return false;
+  console.error(`${label} must be "on" or "off" (got "${raw}")`);
+  process.exit(1);
 }
 
 export async function main(argv: string[]): Promise<void> {
@@ -133,11 +144,26 @@ export async function main(argv: string[]): Promise<void> {
   const vaultFolder = vaultFolderOverride ?? defaultVaultFolder;
   const hasVaultOverride = !!vaultFolderOverride && vaultFolderOverride !== defaultVaultFolder;
 
+  // --audit=on|off — explicit flag wins; otherwise prompt when interactive
+  // (or no flag and TTY); otherwise default to enabled.
+  const auditFlag = flags.audit;
+  let auditEnabled: boolean;
+  if (auditFlag !== undefined && !interactive) {
+    auditEnabled = parseOnOff(auditFlag, "--audit");
+  } else if (isTty() && (interactive || auditFlag === undefined)) {
+    const prefilled =
+      auditFlag !== undefined ? parseOnOff(auditFlag, "--audit") : DEFAULT_AUDIT_ENABLED;
+    auditEnabled = askBool("Enable audit log?", prefilled);
+  } else {
+    auditEnabled = auditFlag !== undefined ? parseOnOff(auditFlag, "--audit") : DEFAULT_AUDIT_ENABLED;
+  }
+
   const cfg: ConfigFile = {
     version: 1,
     s3: { endpoint, region, bucket, accessKeyId, secretAccessKey, useSsl },
     encryption: { salt: randomSalt() },
     ...(hasVaultOverride ? { files: { vaultFolder } } : {}),
+    audit: { enabled: auditEnabled },
   };
 
   const filePath = await saveConfigFile(repo, env, cfg);

@@ -1,6 +1,6 @@
 {
   "name": "@muthuishere/vsync",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Encrypted secret-sync CLI for small teams. Self-contained per-(repo, env) config + OS keychain key + AES-GCM-on-S3 + share-file onboarding + fanout to GitHub/GCP. Bun-native, run via bunx.",
   "type": "module",
   "bin": {

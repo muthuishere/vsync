@@ -149,13 +149,14 @@ Every command works fully via flags or fully via prompts.
 
 | Cmd | Purpose |
 |---|---|
-| `init <env>` | Generate AES key (→ keychain), write self-contained per-repo config, create the resolved vault folder, relocate an existing root `.env.<env>` if found (with a prompt). First-ever run on a machine also writes `~/.config/vsync/defaults` from the supplied values; subsequent runs pre-fill from defaults. Flags: `--bucket --endpoint --region --access-key --secret-key --use-ssl --vault-folder=<path> --migrate-from=<path> --no-migrate`. |
-| `export <env>` | Write a passphrase-encrypted `.share` file containing the full per-repo config + key. Flags: `--out=<path>` (default `./<repo>-<env>.share`), `--passphrase=<p>` (default: auto-generated readable passphrase). |
-| `import <env> <file>` | Decrypt a `.share` file with its passphrase; write the per-repo config + save key to keychain. Idempotent — re-importing overwrites. Flags: `--passphrase=<p>`, `--file=<path>` (alt to positional). |
-| `push <env>` | Zip the resolved vault folder → manifest-seal → AES-256-GCM encrypt → upload to `s3://<bucket>/<repo>/<env>/versions/<ts>.enc`, then update `s3://<bucket>/<repo>/<env>/latest`. |
-| `pull <env>` | Read `latest` pointer → download version → verify embedded manifest timestamp matches pointer (anti-rollback) → decrypt → unzip into the resolved vault folder. Auto-backs up existing contents first. |
+| `init <env>` | Generate AES key (→ keychain), write self-contained per-repo config, create the resolved vault folder, relocate an existing root `.env.<env>` if found (with a prompt). First-ever run on a machine also writes `~/.config/vsync/defaults` from the supplied values; subsequent runs pre-fill from defaults. Flags: `--bucket --endpoint --region --access-key --secret-key --use-ssl --vault-folder=<path> --migrate-from=<path> --no-migrate --audit=on\|off`. |
+| `export <env>` | Write a passphrase-encrypted `.share` file containing the full per-repo config + key. Flags: `--out=<path>` (default `./<repo>-<env>.share`), `--passphrase=<p>` (default: auto-generated readable passphrase), `--no-audit`, `--note=<text>`, `--meta key=value` (repeatable). |
+| `import <env> <file>` | Decrypt a `.share` file with its passphrase; write the per-repo config + save key to keychain. Idempotent — re-importing overwrites. Flags: `--passphrase=<p>`, `--file=<path>` (alt to positional), `--no-audit`, `--note=<text>`, `--meta key=value` (repeatable). |
+| `push <env>` | Zip the resolved vault folder → manifest-seal → AES-256-GCM encrypt → upload to `s3://<bucket>/<repo>/<env>/versions/<ts>.enc`, then update `s3://<bucket>/<repo>/<env>/latest`. Flags: `--no-audit`, `--note=<text>`, `--meta key=value` (repeatable). |
+| `pull <env>` | Read `latest` pointer → download version → verify embedded manifest timestamp matches pointer (anti-rollback) → decrypt → unzip into the resolved vault folder. Auto-backs up existing contents first. Flags: `--no-audit`, `--note=<text>`, `--meta key=value` (repeatable). |
 | `versions <env>` | List `s3://<bucket>/<repo>/<env>/versions/`. One line per version with size + age, `* latest` marker on the active one. Read-only; no decrypt. |
 | `sync <env> <gh\|gcp\|all>` | Read `<vaultFolder>/.env.<env>` → push each KV to the named target. Parallel (6 workers, 10-min timeout). First run prompts for routing config (gh repo / gcp project) and saves it; subsequent runs zero-prompt. Flags: `--gh-repo=<owner/name>`, `--gcp-project=<id>`. |
+| `audit <env>` | Print the S3-side audit log: who/where/when of every pull/push/import/export. Flags: `--limit=N`, `--all`, `--csv`. |
 | `docs` | Print a short onboarding reference (commands, vault layout, backup recovery procedure) to stdout. Pipe wherever you want — e.g. `vsync docs > infra/AGENTS.md`. |
 
 ### `sync` env-file parsing
@@ -171,6 +172,28 @@ Two local-only keys (skipped — used by `gh` / `gcloud` on the local machine, n
 - `GOOGLE_APPLICATION_CREDENTIALS`
 
 Everything else is pushed verbatim.
+
+### Audit log
+
+Every `pull`, `push`, `import`, and `export` appends a row to `s3://<bucket>/<repo>/<env>/audit.csv` so the team can see who did what, from where, and when. Columns:
+
+- `ts, action, version_ts, hostname, local_ip, os_user, git_email, vsync_version, bun_version, meta`
+
+On by default. Skip a single invocation with `--no-audit`. Disable per (repo, env) with `vsync init <env> --audit=off` (or pick "off" at the first-time prompt).
+
+Tag any row with free-form context via `--note=<text>` (sugar for `--meta note=<text>`) or `--meta key=value` (repeatable). The matching env vars `VSYNC_AUDIT_NOTE` and `VSYNC_AUDIT_META` (a JSON object) merge in for CI ergonomics. Example one-liner:
+
+```bash
+VSYNC_AUDIT_META='{"run_id":"7891234","commit":"abc123"}' \
+  vsync pull production --note="prod deploy" --meta ticket=BUG-42
+```
+
+View the log with `vsync audit <env>` (`--limit=N`, `--all`, `--csv`).
+
+Two honesty bullets:
+
+- This is a transparency aid, not tamper-proof. Anyone with bucket write can rewrite the CSV; vsync just makes honest activity legible.
+- The log does not let you reclaim already-pulled secrets. Once a teammate has pulled, they hold a local copy — rotate the key to invalidate future pulls.
 
 ---
 
@@ -241,9 +264,11 @@ In practice, just don't lose the keychain entry. `pull` itself is the recovery p
 
 ## Versioning
 
-This is **0.3.0** — a clean break from `@muthuishere/secret-lib` 0.2.x. New package name, new bin (`vsync`), new keychain service (`tools.vsync`), new config root (`~/.config/vsync/`), new vault layout (`infra/vault/<env>/.env.<env>`). The crypto envelope (`RQE1`) is unchanged.
+This is **0.4.0** — adds an append-only audit log at `s3://<bucket>/<repo>/<env>/audit.csv` and the `vsync audit` viewer. Fully additive over 0.3.x: no wire-format break, no config migration. Old clients ignore `audit.csv`; new clients tolerate its absence.
 
-0.3.x does not auto-migrate from 0.2.x. The supported upgrade path is to re-`init` from scratch:
+0.3.0 was the rebrand from `@muthuishere/secret-lib` 0.2.x — new package name, new bin (`vsync`), new keychain service (`tools.vsync`), new config root (`~/.config/vsync/`), new vault layout (`infra/vault/<env>/.env.<env>`). The crypto envelope (`RQE1`) is unchanged.
+
+0.3.x and later do not auto-migrate from 0.2.x. The supported upgrade path is to re-`init` from scratch:
 
 ```bash
 vsync init dev          # auto-relocates root .env.dev if it exists
