@@ -1,34 +1,90 @@
 # vsync
 
-Encrypted secret-sync CLI for small teams.
+**Your `.env` files — kept as simple, made as safe as a vault.**
 
-- **One canonical store on S3** — your `infra/vault/<env>/` folder, sealed with AES-256-GCM and a manifest pointer that prevents silent rollback.
-- **Per-machine encryption key** in the OS keychain (`Bun.secrets` — macOS Keychain, Linux libsecret, Windows Credential Manager).
-- **Fanout** to GitHub Repo Secrets and GCP Secret Manager from the same source of truth.
-- **Share file** for onboarding teammates with one passphrase-protected `.share` and one passphrase, sent on different channels.
+![vsync flow](docs/vsync-flow.png)
+
+A `.env` file is the friendliest thing in your repo: one line per secret, edited by hand, loaded by every framework. It's also the worst thing in your repo — passed around on Slack, copy-pasted into the wrong window, never the same on any two laptops, **never encrypted, never versioned, never auditable**. The moment one teammate's secrets drift from another's, you stop trusting `.env` and start emailing JSON files.
+
+vsync keeps the `.env` you already write, and turns it into a real vault:
+
+- **One folder per environment.** Anything secret — `.env.dev`, `gcp-sa.json`, TLS certs, regression fixtures, signing keys — lives under `infra/vault/<env>/`. No naming convention to learn; whatever is in there gets sealed.
+- **Encrypted bucket as the canonical store.** `vsync push <env>` zips the folder, seals it with AES-256-GCM + manifest-anti-rollback, uploads to any S3-compatible bucket: **AWS S3, Hetzner Object Storage, self-hosted MinIO, Cloudflare R2, Backblaze B2**. The bucket holds the only blessed copy.
+- **One-passphrase onboarding.** New teammate runs `vsync import dev <file>.share`, types the passphrase you sent on a separate channel, runs `vsync pull dev`. Done. No shell-rc edits, no env-var blobs, no key sharing in Slack DMs.
+- **Fanout to where prod actually runs.** `vsync sync dev gh` and `vsync sync dev gcp` push the same `.env.<env>` keys to GitHub Actions secrets / GCP Secret Manager. One edit in the vault; both stay in step.
+- **Append-only audit log.** Every push/pull/import/export records `who, where, when, version, free-form note` to a CSV on the bucket. `vsync audit dev` prints it. CI passes `--note="run #1234"` and it shows up.
+- **Per-machine key in the OS keychain.** `Bun.secrets` — macOS Keychain, Linux libsecret, Windows Credential Manager. The S3 bucket alone is useless; the key alone is useless. Both halves required to decrypt.
 
 ```bash
 bunx @muthuishere/vsync --help
 ```
 
-No shell-rc edits. No giant base64 blob in `~/.zshrc`. Run via `bunx`; nothing to install.
+Run via `bunx`. No install, no shell-rc edits, no giant base64 blob in `~/.zshrc`.
+
+---
+
+## What lives in the vault
+
+Whatever your app needs at runtime that you'd otherwise scatter across Slack DMs, a password manager, or `~/Downloads/`:
+
+```
+infra/vault/
+  dev/
+    .env.dev                  # KV secrets — vsync sync ships these to gh/gcp
+    gcp-sa.json               # JSON service account key
+    regression-fixture.json   # test data that mirrors prod shape
+    tls/cert.pem
+    tls/key.pem
+  production/
+    .env.production
+    gcp-sa.json
+```
+
+vsync doesn't care what's in there — it zips and seals the whole folder. The `.env.<env>` file is special only in that `vsync sync` reads it for KV fanout to GitHub / GCP. Everything else (JSON keys, certs, regression fixtures, anything binary) just rides along in the encrypted bundle and lands back on every teammate's disk after `pull`.
+
+So regression tests, scripts, or any tool that needs real-shape inputs read directly from `infra/vault/<env>/whatever.json` — no separate test-data dance.
+
+For monorepos, override per-(repo, env): `vsync init dev --vault-folder=apps/foo/infra/vault/dev`. The path is stored in the per-repo config and carried in the `.share` file so teammates inherit it automatically.
+
+---
+
+## Switching environments — `vsync use`
+
+So apps don't need to know vault paths, `vsync use <env>` creates a symlink that points the conventional `.env` location at the vault's env file:
+
+```bash
+vsync use dev                          # ./.env → infra/vault/dev/.env.dev
+vsync use production                   # repoint to infra/vault/production/.env.production
+vsync use                              # print current target
+```
+
+Any framework reading `.env` (Vite, Next.js, Bun, dotenv, every Python lib) just works — no path argument, no custom loader. Switch environments with one command; restart your dev server and you're running against the new env.
+
+**Pick a different link name or location** with `--link=<path>` — useful when you already have a `.env`, want the conventional `.env.<env>` name, or work in a monorepo:
+
+```bash
+vsync use dev  --link=.env.dev          # ./.env.dev → infra/vault/dev/.env.dev
+vsync use prod --link=apps/web/.env     # apps/web/.env → … (monorepo)
+```
+
+**Safety:** if the link path already exists as a *regular file*, vsync refuses to touch it — no `--force`, by design. Move or delete it first (`mv .env .env.local.bak`) and re-run. An existing *symlink* at that path is replaced silently (symlinks are cheap to recreate). vsync also warns if the link's basename isn't covered by `.gitignore`.
+
+**Platform support:** POSIX symlinks on macOS / Linux / WSL out of the box. On Windows it uses the same call with `type: "file"` — requires Developer Mode (Settings → Privacy & security → For developers) or an elevated terminal. vsync prints actionable guidance if the privilege is missing.
 
 ---
 
 ## Mental model
 
-Two persistent halves per (repo, env). Both required to push or pull:
+Every (repo, env) is held by **two persistent halves**. Both required to push or pull; either one alone is useless.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │ Disk (chmod 0600)                                                │
 │  ~/.config/vsync/<repo>/env_<env>        self-contained config   │
-│    ├── s3.{endpoint, region, bucket, …}    required              │
-│    ├── encryption.salt                     random per init       │
+│    ├── s3.{endpoint, region, bucket, …}    where to find bytes   │
+│    ├── encryption.salt                     PBKDF2 input          │
 │    ├── files.vaultFolder                   optional override     │
-│    │                                       (default infra/vault/<env>)│
 │    └── sync.{gh.repo, gcp.project}         set by `vsync sync`   │
-│  ~/.config/vsync/defaults                  pre-fills `init` only │
 └──────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
@@ -39,31 +95,9 @@ Two persistent halves per (repo, env). Both required to push or pull:
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-Anyone with **(S3 read access to the bucket)** AND **(the encryption key in their keychain)** can pull. Either alone is useless: the disk file gets you bucket access but no decrypt; the key gets you decrypt but no bucket location.
+The disk file gets you bucket access — no decrypt. The keychain key gets you decrypt — no bucket location. Stealing one is a non-event; you need both to read a single secret. Offboarding cuts the bucket side (the cloud provider's IAM), then `vsync init` mints a fresh key for the team that stays.
 
-The per-repo file is self-contained — `push`/`pull`/`sync` never read a second config. `~/.config/vsync/defaults` is consulted *only* by `init` to pre-fill prompts on subsequent setups.
-
-In your repo, all secret content lives in one place. Default layout:
-
-```
-infra/vault/
-  dev/
-    .env.dev
-    some-secret.json
-    ...
-  production/
-    .env.production
-```
-
-Apps point dotenv (or equivalent) at the path:
-
-```js
-dotenv.config({ path: `infra/vault/${env}/.env.${env}` });
-```
-
-`vsync init` prints the dotenv snippet so you copy it once.
-
-**Monorepos:** override the vault folder per (repo, env) at init time — `vsync init dev --vault-folder=apps/foo/infra/vault/dev`. The override is stored per-repo, used by every subsequent `push`/`pull`/`sync`, and carried in the `.share` file so teammates inherit it.
+A `.share` file bundles **both halves** under one passphrase. Sent on a different channel than the passphrase itself, it's the smallest possible onboarding step.
 
 ---
 
@@ -152,6 +186,7 @@ Every command works fully via flags or fully via prompts.
 | `init <env>` | Generate AES key (→ keychain), write self-contained per-repo config, create the resolved vault folder, relocate an existing root `.env.<env>` if found (with a prompt). First-ever run on a machine also writes `~/.config/vsync/defaults` from the supplied values; subsequent runs pre-fill from defaults. Flags: `--bucket --endpoint --region --access-key --secret-key --use-ssl --vault-folder=<path> --migrate-from=<path> --no-migrate --audit=on\|off`. |
 | `export <env>` | Write a passphrase-encrypted `.share` file containing the full per-repo config + key. Flags: `--out=<path>` (default `./<repo>-<env>.share`), `--passphrase=<p>` (default: auto-generated readable passphrase), `--no-audit`, `--note=<text>`, `--meta key=value` (repeatable). |
 | `import <env> <file>` | Decrypt a `.share` file with its passphrase; write the per-repo config + save key to keychain. Idempotent — re-importing overwrites. Flags: `--passphrase=<p>`, `--file=<path>` (alt to positional), `--no-audit`, `--note=<text>`, `--meta key=value` (repeatable). |
+| `use <env>` | Symlink the chosen path → `<vaultFolder>/.env.<env>` so plain `dotenv.config()` works without a path arg. Default link path is `./.env`; override with `--link=<path>` (e.g. `--link=.env.dev` or `--link=apps/web/.env`). `vsync use` with no env prints the current target. **Refuses to touch an existing regular file at the link path — no `--force`, by design.** Replaces an existing symlink silently. Warns if the link's basename isn't `.gitignore`d. POSIX symlinks everywhere; Windows requires Developer Mode or an elevated terminal. |
 | `push <env>` | Zip the resolved vault folder → manifest-seal → AES-256-GCM encrypt → upload to `s3://<bucket>/<repo>/<env>/versions/<ts>.enc`, then update `s3://<bucket>/<repo>/<env>/latest`. Flags: `--no-audit`, `--note=<text>`, `--meta key=value` (repeatable). |
 | `pull <env>` | Read `latest` pointer → download version → verify embedded manifest timestamp matches pointer (anti-rollback) → decrypt → unzip into the resolved vault folder. Auto-backs up existing contents first. Flags: `--no-audit`, `--note=<text>`, `--meta key=value` (repeatable). |
 | `versions <env>` | List `s3://<bucket>/<repo>/<env>/versions/`. One line per version with size + age, `* latest` marker on the active one. Read-only; no decrypt. |

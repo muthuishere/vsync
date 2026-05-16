@@ -1,6 +1,9 @@
 node_modules/
 *.log
 
+# `vsync use` creates a symlink here; never commit it.
+.env
+
 # Real env-config JSON files contain plaintext secrets — never committed.
 # Only the placeholder sample is committed.
 envconfig.*.json

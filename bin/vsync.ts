@@ -13,6 +13,7 @@ const SUBCOMMANDS = [
   "init",
   "export",
   "import",
+  "use",
   "push",
   "pull",
   "versions",
@@ -32,6 +33,10 @@ function usage(code = 0): never {
   out("sharing");
   out("  export <env> [--out=path]       write a passphrase-encrypted .share file");
   out("  import <env> <share-file>       restore a .share file into local config + keychain");
+  out("");
+  out("environment switch");
+  out("  use <env> [--link=<path>]       symlink <path> (default ./.env) → <vaultFolder>/.env.<env>");
+  out("  use                             print current ./.env (or --link=<path>) target");
   out("");
   out("day-to-day");
   out("  push <env>                      encrypt + upload local vault folder to s3://<bucket>/<repo>/<env>/");
@@ -75,6 +80,11 @@ switch (subcommand as Subcommand) {
   }
   case "import": {
     const { main } = await import("./import");
+    await main(subArgv);
+    break;
+  }
+  case "use": {
+    const { main } = await import("./use");
     await main(subArgv);
     break;
   }
