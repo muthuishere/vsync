@@ -6,8 +6,8 @@ hero:
   text: Secrets your team actually shares.
   tagline: One encrypted vault for your environment secrets — shared across your team, mirrored to GitHub & GCP, audited every time someone touches it.
   image:
-    src: /vsync-flow.png
-    alt: vsync flow diagram
+    src: /vsync-logo.svg
+    alt: Vsync — a vault encircled by sync arrows
   actions:
     - theme: brand
       text: Get started
