@@ -1,0 +1,54 @@
+/* ──────────────────────────────────────────────────────────────────────
+   Hero image sizing — VitePress's default is too tight; the vsync flow
+   diagram is landscape (1400×740) and gets crushed in the default slot.
+   Widen the image column on desktop so the diagram reads.
+   ────────────────────────────────────────────────────────────────────── */
+
+@media (min-width: 960px) {
+  .VPHero.has-image .container {
+    /* split the hero ~45 / 55 — give the image a touch more room */
+    column-gap: 32px;
+  }
+
+  .VPHero .image {
+    max-width: none !important;
+    max-height: none !important;
+  }
+
+  .VPHero .image-container {
+    max-width: 640px !important;
+    max-height: 480px !important;
+    transform: none !important;
+  }
+
+  .VPHero .image-bg {
+    /* the default blurred-glow background looks off behind a busy diagram —
+       hide it so the diagram reads cleanly */
+    display: none !important;
+  }
+
+  .VPHero .image-src {
+    max-width: 100% !important;
+    max-height: 100% !important;
+    width: auto !important;
+    height: auto !important;
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    transform: none !important;
+    border-radius: 8px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
+  }
+}
+
+@media (min-width: 1280px) {
+  .VPHero .image-container {
+    max-width: 780px !important;
+    max-height: 540px !important;
+  }
+}
+
+/* Light-mode tweak — drop the heavy shadow so the diagram blends on white */
+html:not(.dark) .VPHero .image-src {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
