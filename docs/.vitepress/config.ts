@@ -15,7 +15,6 @@ export default defineConfig({
     nav: [
       { text: "Guide", link: "/guide/quickstart" },
       { text: "Architecture", link: "/architecture/mental-model" },
-      { text: "Specs", link: "/specs/v0.4-audit-log" },
       {
         text: "0.5.0",
         items: [
@@ -74,16 +73,6 @@ export default defineConfig({
         },
       ],
 
-      "/specs/": [
-        {
-          text: "Design specs",
-          items: [
-            { text: "v0.4 — audit log", link: "/specs/v0.4-audit-log" },
-            { text: "v0.3 — vsync rebrand", link: "/specs/v0.3-vsync-rebrand" },
-            { text: "v0.2 — original spec", link: "/specs/v0.2-secret-lib" },
-          ],
-        },
-      ],
     },
 
     socialLinks: [
