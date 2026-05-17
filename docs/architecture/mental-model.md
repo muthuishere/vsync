@@ -42,7 +42,7 @@ If an attacker intercepts the `.share` file but not the passphrase, they have a 
 
 - **The bundle itself.** Lives on S3 alone. Anyone with bucket read can fetch it; without the key, it's `RQE1` magic + nonce + ciphertext, which is white noise.
 - **The vault files in plaintext.** Live on each teammate's local disk after `pull` — under `infra/vault/<env>/`. That's not encrypted at rest beyond filesystem permissions. If a teammate's laptop is unlocked, their vault contents are readable.
-- **GitHub / GCP secret stores.** What `vsync sync` writes there is governed by GitHub / GCP IAM. Outside vsync's perimeter.
+- **External secret stores** (GitHub Actions, GCP Secret Manager, AWS Secrets Manager, Azure Key Vault, HashiCorp Vault). What `vsync sync` writes to each is governed by the destination's own IAM / ACL. Outside vsync's perimeter.
 
 ## Why `~/.config/vsync/` is per-user
 

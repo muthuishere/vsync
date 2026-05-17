@@ -170,6 +170,80 @@ describe("validateConfigFile", () => {
     expect(() => validateConfigFile(bad)).toThrow(/sync\.gcp\.project/);
   });
 
+  test("accepts sync.aws with region only", () => {
+    const good = { ...structuredClone(sample), sync: { aws: { region: "us-east-1" } } };
+    expect(() => validateConfigFile(good)).not.toThrow();
+  });
+
+  test("accepts sync.aws with region and secretPrefix", () => {
+    const good = {
+      ...structuredClone(sample),
+      sync: { aws: { region: "us-east-1", secretPrefix: "myapp/" } },
+    };
+    expect(() => validateConfigFile(good)).not.toThrow();
+  });
+
+  test("rejects sync.aws missing region", () => {
+    const bad = { ...structuredClone(sample), sync: { aws: { region: "" } } } as any;
+    expect(() => validateConfigFile(bad)).toThrow(/sync\.aws\.region/);
+  });
+
+  test("rejects sync.aws.secretPrefix if not a string", () => {
+    const bad = {
+      ...structuredClone(sample),
+      sync: { aws: { region: "us-east-1", secretPrefix: 42 } },
+    } as any;
+    expect(() => validateConfigFile(bad)).toThrow(/sync\.aws\.secretPrefix/);
+  });
+
+  test("accepts sync.azure with vaultName", () => {
+    const good = { ...structuredClone(sample), sync: { azure: { vaultName: "kv-prod" } } };
+    expect(() => validateConfigFile(good)).not.toThrow();
+  });
+
+  test("rejects sync.azure missing vaultName", () => {
+    const bad = { ...structuredClone(sample), sync: { azure: { vaultName: "" } } } as any;
+    expect(() => validateConfigFile(bad)).toThrow(/sync\.azure\.vaultName/);
+  });
+
+  test("accepts sync.vault with addr, mount, secretPath", () => {
+    const good = {
+      ...structuredClone(sample),
+      sync: {
+        vault: {
+          addr: "https://vault.example.com:8200",
+          mount: "secret",
+          secretPath: "myapp/dev",
+        },
+      },
+    };
+    expect(() => validateConfigFile(good)).not.toThrow();
+  });
+
+  test("rejects sync.vault missing addr", () => {
+    const bad = {
+      ...structuredClone(sample),
+      sync: { vault: { addr: "", mount: "secret", secretPath: "myapp/dev" } },
+    } as any;
+    expect(() => validateConfigFile(bad)).toThrow(/sync\.vault\.addr/);
+  });
+
+  test("rejects sync.vault missing mount", () => {
+    const bad = {
+      ...structuredClone(sample),
+      sync: { vault: { addr: "https://x", mount: "", secretPath: "myapp/dev" } },
+    } as any;
+    expect(() => validateConfigFile(bad)).toThrow(/sync\.vault\.mount/);
+  });
+
+  test("rejects sync.vault missing secretPath", () => {
+    const bad = {
+      ...structuredClone(sample),
+      sync: { vault: { addr: "https://x", mount: "secret", secretPath: "" } },
+    } as any;
+    expect(() => validateConfigFile(bad)).toThrow(/sync\.vault\.secretPath/);
+  });
+
   test("accepts an audit block with enabled boolean", () => {
     const good = { ...structuredClone(sample), audit: { enabled: false } };
     expect(() => validateConfigFile(good)).not.toThrow();
@@ -183,6 +257,52 @@ describe("validateConfigFile", () => {
   test("rejects audit if not an object", () => {
     const bad = { ...structuredClone(sample), audit: 42 } as any;
     expect(() => validateConfigFile(bad)).toThrow(/audit/);
+  });
+});
+
+describe("new sync blocks round-trip (v0.8)", () => {
+  beforeEach(() => {
+    rmSync(join(tmpRoot, "vsync"), { recursive: true, force: true });
+  });
+
+  test("sync.aws round-trips", async () => {
+    const cfg: ConfigFile = {
+      ...sample,
+      sync: { aws: { region: "us-east-1", secretPrefix: "myapp/" } },
+    };
+    await saveConfigFile("acme", "dev", cfg);
+    const loaded = await loadConfigFile("acme", "dev");
+    expect(loaded?.sync?.aws).toEqual({ region: "us-east-1", secretPrefix: "myapp/" });
+  });
+
+  test("sync.azure round-trips", async () => {
+    const cfg: ConfigFile = {
+      ...sample,
+      sync: { azure: { vaultName: "kv-prod" } },
+    };
+    await saveConfigFile("acme", "dev", cfg);
+    const loaded = await loadConfigFile("acme", "dev");
+    expect(loaded?.sync?.azure).toEqual({ vaultName: "kv-prod" });
+  });
+
+  test("sync.vault round-trips", async () => {
+    const cfg: ConfigFile = {
+      ...sample,
+      sync: {
+        vault: {
+          addr: "https://vault.example.com:8200",
+          mount: "secret",
+          secretPath: "myapp/dev",
+        },
+      },
+    };
+    await saveConfigFile("acme", "dev", cfg);
+    const loaded = await loadConfigFile("acme", "dev");
+    expect(loaded?.sync?.vault).toEqual({
+      addr: "https://vault.example.com:8200",
+      mount: "secret",
+      secretPath: "myapp/dev",
+    });
   });
 });
 

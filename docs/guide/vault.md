@@ -5,7 +5,7 @@ Whatever your app needs at runtime that you'd otherwise scatter across Slack DMs
 ```
 infra/vault/
   dev/
-    .env.dev                  # KV secrets — vsync sync ships these to gh/gcp
+    .env.dev                  # KV secrets — vsync sync ships these to gh/gcp/aws/azure/vault
     gcp-sa.json               # JSON service account key
     regression-fixture.json   # test data that mirrors prod shape
     tls/cert.pem
@@ -15,7 +15,7 @@ infra/vault/
     gcp-sa.json
 ```
 
-vsync doesn't care what's in there — it zips and seals the whole folder. The `.env.<env>` file is special only in that `vsync sync` reads it for KV fanout to GitHub / GCP. Everything else (JSON keys, certs, regression fixtures, anything binary) just rides along in the encrypted bundle and lands back on every teammate's disk after `pull`.
+vsync doesn't care what's in there — it zips and seals the whole folder. The `.env.<env>` file is special only in that `vsync sync` reads it for KV fanout to GitHub / GCP / AWS / Azure / Vault. Everything else (JSON keys, certs, regression fixtures, anything binary) just rides along in the encrypted bundle and lands back on every teammate's disk after `pull`.
 
 So regression tests, scripts, or any tool that needs real-shape inputs read directly from `infra/vault/<env>/whatever.json` — no separate test-data dance.
 

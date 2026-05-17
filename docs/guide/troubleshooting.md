@@ -54,16 +54,51 @@ vsync sync dev gh \
   --inline-file-suffix=_FILE
 ```
 
-Repeatable — one suffix per occurrence. Add any custom suffixes your project uses (`_KEY`, `_CERT`, etc.) the same way. See [Fanout to GitHub / GCP — file references](/guide/sync#file-references-in-env-env-explicit-opt-in).
+Repeatable — one suffix per occurrence. Add any custom suffixes your project uses (`_KEY`, `_CERT`, etc.) the same way. See [Fanout — file references](/guide/sync#file-references-in-env-env-explicit-opt-in).
 
-## `gh` / `gcloud` not found on PATH
+## AWS: `aws secretsmanager` errors with `ResourceNotFoundException`
 
-Install and authenticate them locally. vsync shells out; it doesn't manage external CLI auth.
+Expected on the first push to a brand-new key — vsync probes with `describe-secret` and switches to `create-secret` when the secret doesn't exist yet. The line shows up only because the AWS CLI prints to stderr before exiting non-zero; vsync swallows the exit code and continues with `create-secret`. If the message keeps appearing on subsequent runs of the *same* key, the real cause is a **region mismatch** — `--aws-region` is missing, wrong, or pointing at a region where the secret was never created.
+
+```bash
+# Check what's persisted in the per-(repo, env) config:
+gunzip -c ~/.config/vsync/<repo>/env_<env> | jq .sync.aws
+```
+
+Set the right region with `--aws-region=<region>` (saved on first use) and re-run.
+
+## Azure: `az keyvault secret set` rejects my key with "name does not match"
+
+Azure Key Vault accepts only `0-9 A-Z a-z -` in secret names. An underscore in your `.env.<env>` (e.g. `DATABASE_URL`) fails at push time with a name-validation error from `az`.
+
+**vsync deliberately does not translate `_` → `-`** — that's the v0.7 no-magic theme. Operator options:
+
+- Rename the key in `.env.<env>` to use a dash (`DATABASE-URL=…`).
+- Skip the offending keys with `--exclude-property=DATABASE_URL` (repeatable).
+- Maintain an Azure-shaped env file alongside the shared one.
+
+See [Fanout — `vsync sync <env> azure`](/guide/sync#vsync-sync-env-azure) for the full constraint discussion.
+
+## Vault: `vault kv put` fails with "permission denied" or "no handler for route"
+
+Two distinct causes, same surface:
+
+- **`no handler for route`** — `--vault-mount` points at something that isn't a KV v2 mount. vsync only supports KV v2 (KV v1, Transit, PKI, namespaces are out of scope). Check with `vault secrets list` and pass the right mount.
+- **`permission denied`** — the token from `vault login` (in `~/.vault-token`) lacks `create` / `update` capability on `<mount>/data/<secretPath>`. Talk to whoever manages your Vault policies; vsync doesn't elevate or refresh tokens.
+
+vsync writes the whole KV map in **one atomic `vault kv put`** — either everything lands or nothing does. There's no partial-success state to recover from.
+
+## `gh` / `gcloud` / `aws` / `az` / `vault` not found on PATH
+
+Install and authenticate them locally. vsync shells out for all five sync targets; it doesn't manage external CLI auth for any of them.
 
 - GitHub CLI: [cli.github.com](https://cli.github.com)
 - gcloud CLI: [cloud.google.com/sdk/docs/install](https://cloud.google.com/sdk/docs/install)
+- AWS CLI: [aws.amazon.com/cli](https://aws.amazon.com/cli/)
+- Azure CLI: [learn.microsoft.com/cli/azure/install-azure-cli](https://learn.microsoft.com/cli/azure/install-azure-cli)
+- HashiCorp Vault CLI: [developer.hashicorp.com/vault/install](https://developer.hashicorp.com/vault/install)
 
-After install: `gh auth login` / `gcloud auth login`.
+After install: `gh auth login` / `gcloud auth login` / `aws configure` (or `aws sso login`) / `az login` / `vault login`.
 
 ## `warning: failed to record audit entry: …` after a successful push/pull
 
