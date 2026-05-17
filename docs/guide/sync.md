@@ -27,21 +27,56 @@ Auth is **outside vsync's scope** — the lib trusts whatever `gh` and `gcloud` 
 
 ## `vsync sync <env> all`
 
-Runs both targets in sequence. A failure on one target doesn't abort the other; final summary lists what failed.
+Runs both targets in sequence. A per-secret failure on one target doesn't abort the other; final summary lists what failed. **Parse-time failures** (a `*_PATH` / `*_FILE` pointing at a missing file — see below) abort the whole run before any push.
 
-## Special env-file keys
+## File references in `.env.<env>` — `*_PATH` and `*_FILE`
 
-The `.env.<env>` parser has two **path-expansion** rules (read the file from disk, push its contents instead of the path):
+Any key in `.env.<env>` whose name ends in `_PATH` or `_FILE` is treated as a **file reference**. Vsync reads the file from disk and pushes its contents as the secret value, under the key with the suffix stripped:
 
 | `.env` entry | What gets pushed | Key on the target |
 |---|---|---|
-| `GCP_SA_KEY_FILE_PATH=/path/to/sa.json` | contents of the file (must be JSON) | `GCP_SA_KEY` |
-| `SSH_KEY_PATH=~/.ssh/id_rsa` | contents of the file (tilde expanded) | `SSH_PRIVATE_KEY` |
+| `SSH_PRIVATE_KEY_PATH=keys/reqsume_dev` | contents of `<vault>/keys/reqsume_dev` | `SSH_PRIVATE_KEY` |
+| `GCP_SA_KEY_FILE=keys/sa.json` | contents of `<vault>/keys/sa.json` | `GCP_SA_KEY` |
+| `TLS_CERT_PATH=~/certs/foo.pem` | contents of `$HOME/certs/foo.pem` | `TLS_CERT` |
+| `BOOTSTRAP_FILE=/etc/foo/bootstrap` | contents of `/etc/foo/bootstrap` | `BOOTSTRAP` |
 
-Two **skip** keys (used by `gh` / `gcloud` on your local machine — never pushed):
+The rule is: **name the env-file key after the secret you want, with `_PATH` or `_FILE` appended.** No rename table, no special cases.
+
+### Path resolution
+
+Relative paths anchor to `VAULT_ROOT` (the directory of the `.env.<env>` file being parsed):
+
+| In env file | Resolves to |
+|---|---|
+| `keys/foo` or `./keys/foo` | `<vault>/keys/foo` |
+| `${VAULT_ROOT}/keys/foo` | same (explicit form) |
+| `~/.ssh/id_rsa` or `${HOME}/.ssh/id_rsa` | `$HOME/.ssh/id_rsa` |
+| `/abs/path` | absolute, pass-through |
+
+The three placeholders (`${VAULT_ROOT}`, `${HOME}`, leading `~/`) are expanded in **every** value — not just file-ref values — so you can also write `DATA_DIR=${VAULT_ROOT}/cache` for plain KVs.
+
+### All-or-none on missing files
+
+If any `*_PATH` / `*_FILE` references a missing or unreadable file, vsync collects every such error across the whole file and aborts before pushing anything. No partial syncs.
+
+Example error:
+```
+parseEnvFile: aborting sync — 2 file reference(s) could not be resolved:
+  - SSH_PRIVATE_KEY_PATH: file not found at /…/vault/dev/keys/missing
+  - DEPLOY_KEY_FILE: file not found at /…/vault/dev/deploy.key
+```
+
+## Skip + routing keys
+
+Skipped (used by `gh` / `gcloud` on your local machine — never pushed):
 
 - `GITHUB_TOKEN`
 - `GOOGLE_APPLICATION_CREDENTIALS`
+
+Routing metadata (consumed by `vsync sync` itself — never pushed):
+
+- `GITHUB_REPO`
+- `GCP_PROJECT_ID`
 
 Everything else is pushed verbatim with the same key name.
 

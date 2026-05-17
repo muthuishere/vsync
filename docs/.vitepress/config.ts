@@ -16,7 +16,7 @@ export default defineConfig({
       { text: "Guide", link: "/guide/quickstart" },
       { text: "Architecture", link: "/architecture/mental-model" },
       {
-        text: "0.5.0",
+        text: "0.6.0",
         items: [
           { text: "Changelog", link: "/guide/versioning" },
           { text: "npm", link: "https://www.npmjs.com/package/@muthuishere/vsync" },

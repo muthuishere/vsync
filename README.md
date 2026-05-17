@@ -200,17 +200,24 @@ Every command works fully via flags or fully via prompts.
 
 ### `sync` env-file parsing
 
-Two special-case keys (path → file content inlining):
+**File references — `*_PATH` / `*_FILE`.** Any key in `.env.<env>` whose name ends in `_PATH` or `_FILE` is read from disk; vsync pushes the file's contents under the key with the suffix stripped. Examples:
 
-- `GCP_SA_KEY_FILE_PATH=<path>` → reads the file, pushes the contents as `GCP_SA_KEY` (must look like JSON).
-- `SSH_KEY_PATH=<path>` → reads the file, pushes as `SSH_PRIVATE_KEY`.
+- `SSH_PRIVATE_KEY_PATH=keys/reqsume_dev` → pushes `<vault>/keys/reqsume_dev` as `SSH_PRIVATE_KEY`.
+- `GCP_SA_KEY_FILE=keys/sa.json` → pushes `<vault>/keys/sa.json` as `GCP_SA_KEY`.
+
+Relative paths anchor to `VAULT_ROOT` (the directory of the env file being parsed). Placeholders `${VAULT_ROOT}`, `${HOME}`, and leading `~/` are expanded in every value. Any missing or unreadable referenced file aborts the whole sync before any push (all-or-none).
 
 Two local-only keys (skipped — used by `gh` / `gcloud` on the local machine, not pushed):
 
 - `GITHUB_TOKEN`
 - `GOOGLE_APPLICATION_CREDENTIALS`
 
-Everything else is pushed verbatim.
+Two routing keys (consumed by `vsync sync` itself, never pushed):
+
+- `GITHUB_REPO`
+- `GCP_PROJECT_ID`
+
+Everything else is pushed verbatim. Full convention in [`docs/guide/sync.md`](docs/guide/sync.md) and design context in [`docs/specs/v0.6-vault-relative-file-refs.md`](docs/specs/v0.6-vault-relative-file-refs.md).
 
 ### Audit log
 
@@ -242,7 +249,7 @@ Auth is **outside vsync's scope** — the lib trusts whatever `gh` and `gcloud` 
 
 **`vsync sync <env> gh`:**
 1. Resolves `sync.gh.repo` from per-repo config (or `--gh-repo` flag, or first-run prompt).
-2. Parses `<vaultFolder>/.env.<env>` into push-ready KVs (after special-case + skip rules).
+2. Parses `<vaultFolder>/.env.<env>` into push-ready KVs (file-ref + skip rules below).
 3. For each KV in a 6-worker pool: `gh secret set <KEY> --env <env> --repo <sync.gh.repo>` with the value on stdin.
 4. Requires `gh` CLI installed and `gh auth login` already done.
 
@@ -252,7 +259,33 @@ Auth is **outside vsync's scope** — the lib trusts whatever `gh` and `gcloud` 
 3. For each KV: `gcloud secrets describe <KEY> --project=<proj>` to check existence; either `gcloud secrets versions add <KEY>` (exists) or `gcloud secrets create <KEY> --replication-policy=automatic` (new). Value on stdin via `--data-file=-`.
 4. Requires `gcloud` CLI installed and `gcloud auth login` done. Per-env isolation comes from per-env GCP projects (dev project ≠ prod project) — secret names are flat within a project.
 
-**`vsync sync <env> all`** runs both in sequence. Failures don't abort siblings; final summary lists what failed.
+**`vsync sync <env> all`** runs both in sequence. Per-secret push failures don't abort siblings; final summary lists what failed. Parse-time failures (see "all-or-none" below) abort everything before any push.
+
+### File-reference convention (`.env.<env>`)
+
+Vsync reads each line of `.env.<env>` and pushes a KV to gh/gcp. Some keys carry **file paths** instead of literal values — vsync reads the file and pushes its bytes:
+
+| In env file | Pushed as | Notes |
+|---|---|---|
+| `FOO_PATH=keys/foo` | `FOO` = file contents | suffix `_PATH` stripped; file resolved vault-relative |
+| `FOO_FILE=keys/foo` | `FOO` = file contents | suffix `_FILE` stripped; same resolution |
+| `SSH_PRIVATE_KEY_PATH=keys/dev` | `SSH_PRIVATE_KEY` = file contents | name the env-file key after the secret you want |
+| `GITHUB_TOKEN=…` | *skipped* | local-only |
+| `GOOGLE_APPLICATION_CREDENTIALS=…` | *skipped* | local-only |
+| `GITHUB_REPO=…`, `GCP_PROJECT_ID=…` | *routing meta* — never pushed | consumed by sync itself |
+
+**Path resolution.** Relative paths anchor to `VAULT_ROOT` (the directory of the env file being parsed). Three forms of placeholder expansion are recognised in **every** value — file-ref or plain:
+
+| Form | Means |
+|---|---|
+| `${VAULT_ROOT}/keys/foo` | `<vault>/keys/foo` (explicit) |
+| `keys/foo` or `./keys/foo` | `<vault>/keys/foo` (implicit — no placeholder needed) |
+| `~/.ssh/id_rsa` or `${HOME}/.ssh/id_rsa` | `$HOME/.ssh/id_rsa` |
+| `/abs/path` | absolute, pass-through |
+
+**All-or-none on file refs.** If any `*_PATH` / `*_FILE` references a missing or unreadable file, vsync collects every such error and aborts before pushing anything. No partial syncs.
+
+The canonical short-form reference lives in the header comment of [`src/envfile.ts`](src/envfile.ts); design context is in [`docs/specs/v0.6-vault-relative-file-refs.md`](docs/specs/v0.6-vault-relative-file-refs.md).
 
 ---
 

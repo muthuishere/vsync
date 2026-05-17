@@ -2,7 +2,8 @@
 
 | Release | What's in it |
 |---|---|
-| **0.5.0** | `vsync use <env>` — symlinks `./.env` (or `--link=<path>`) at the vault's env file so `dotenv.config()` just works; switch envs with one command. README rewrite + flow diagram. |
+| **0.6.0** | `.env.<env>` file-reference convention: any key ending in `_PATH` / `_FILE` is read from disk and the file's contents are pushed under the stripped name. Paths anchor to `VAULT_ROOT` (the env file's own directory); `${VAULT_ROOT}` / `${HOME}` / `~/` placeholders work in every value. Missing files abort the sync before any push (all-or-none). Replaces the two hardcoded keys from 0.5.x (`SSH_KEY_PATH`, `GCP_SA_KEY_FILE_PATH`) — see [migration](/specs/v0.6-vault-relative-file-refs). |
+| 0.5.0 | `vsync use <env>` — symlinks `./.env` (or `--link=<path>`) at the vault's env file so `dotenv.config()` just works; switch envs with one command. README rewrite + flow diagram. |
 | 0.4.0 | Append-only audit log at `s3://<bucket>/<repo>/<env>/audit.csv` + `vsync audit` viewer. Expandable `meta` JSON cell via `--note` / `--meta` + matching env vars. |
 | 0.3.0 | Opinionated layout: vault folder at `infra/vault/<env>/` with `--vault-folder` override; self-contained per-(repo, env) config; `vsync sync` for GitHub / GCP fanout. |
 
@@ -22,7 +23,7 @@ If your team upgrades unevenly, the older clients continue to work — they just
 
 ## Source of truth for each release
 
-The design docs at [`docs/specs/`](/specs/v0.4-audit-log) capture the rationale and constraints for each minor release. Read them when you need to know **why** something is the way it is — they go deeper than the user guide.
+The design docs at [`docs/specs/`](/specs/v0.6-vault-relative-file-refs) capture the rationale and constraints for each minor release. Read them when you need to know **why** something is the way it is — they go deeper than the user guide.
 
 ---
 

@@ -1,6 +1,6 @@
 import { test, expect, describe, beforeEach, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseEnvFile } from "../src/envfile";
 
@@ -17,6 +17,13 @@ describe("parseEnvFile", () => {
 
   function write(name: string, content: string): string {
     const p = join(dir, name);
+    writeFileSync(p, content);
+    return p;
+  }
+
+  function writeAt(rel: string, content: string): string {
+    const p = join(dir, rel);
+    mkdirSync(join(dir, rel, "..").replace(/[/]\.\.$/, ""), { recursive: true });
     writeFileSync(p, content);
     return p;
   }
@@ -66,41 +73,90 @@ describe("parseEnvFile", () => {
     expect(meta).toEqual({ GITHUB_REPO: "owner/repo", GCP_PROJECT_ID: "my-proj" });
   });
 
-  test("GCP_SA_KEY_FILE_PATH expands to GCP_SA_KEY", () => {
-    const keyFile = write("sa.json", `  {"type":"service_account","x":1}\n`);
-    const p = write(".env.dev", `GCP_SA_KEY_FILE_PATH=${keyFile}\n`);
+  // --- generic suffix rules ---
+
+  test("generic *_PATH strips _PATH and pushes file contents", () => {
+    write("foo.txt", "the body\n");
+    const p = write(".env.dev", `MY_KEY_PATH=foo.txt\n`);
     const { tasks } = parseEnvFile(p);
-    expect(tasks).toEqual([
-      { key: "GCP_SA_KEY", value: `{"type":"service_account","x":1}` },
-    ]);
+    expect(tasks).toEqual([{ key: "MY_KEY", value: "the body\n" }]);
   });
 
-  test("GCP_SA_KEY_FILE_PATH rejects non-JSON content", () => {
-    const keyFile = write("sa.txt", "not json");
-    const p = write(".env.dev", `GCP_SA_KEY_FILE_PATH=${keyFile}\n`);
-    expect(() => parseEnvFile(p)).toThrow(/does not look like JSON/);
+  test("generic *_FILE strips _FILE and pushes file contents", () => {
+    write("bar.txt", "another body");
+    const p = write(".env.dev", `ANOTHER_FILE=bar.txt\n`);
+    const { tasks } = parseEnvFile(p);
+    expect(tasks).toEqual([{ key: "ANOTHER", value: "another body" }]);
   });
 
-  test("SSH_KEY_PATH expands to SSH_PRIVATE_KEY (raw bytes)", () => {
-    const keyFile = write(
-      "id_rsa",
-      "-----BEGIN PRIVATE KEY-----\nabcd\n-----END PRIVATE KEY-----\n",
+  test("./ resolves vault-relative", () => {
+    write("local.txt", "local body");
+    const p = write(".env.dev", `THING_PATH=./local.txt\n`);
+    const { tasks } = parseEnvFile(p);
+    expect(tasks).toEqual([{ key: "THING", value: "local body" }]);
+  });
+
+  test("nested vault-relative path", () => {
+    mkdirSync(join(dir, "keys"), { recursive: true });
+    writeFileSync(join(dir, "keys", "k1"), "k1-body");
+    const p = write(".env.dev", `K1_PATH=keys/k1\n`);
+    const { tasks } = parseEnvFile(p);
+    expect(tasks).toEqual([{ key: "K1", value: "k1-body" }]);
+  });
+
+  test("${VAULT_ROOT} placeholder resolves to env file directory", () => {
+    write("explicit.txt", "explicit");
+    const p = write(".env.dev", `THING_PATH=\${VAULT_ROOT}/explicit.txt\n`);
+    const { tasks } = parseEnvFile(p);
+    expect(tasks).toEqual([{ key: "THING", value: "explicit" }]);
+  });
+
+  test("absolute paths pass through unchanged", () => {
+    const abs = write("abs.txt", "abs body");
+    const p = write(".env.dev", `THING_PATH=${abs}\n`);
+    const { tasks } = parseEnvFile(p);
+    expect(tasks).toEqual([{ key: "THING", value: "abs body" }]);
+  });
+
+  test("missing *_PATH file throws with all errors aggregated", () => {
+    write("present.txt", "ok");
+    const p = write(
+      ".env.dev",
+      [
+        "A_PATH=present.txt",
+        "B_PATH=missing1.txt",
+        "C_FILE=missing2.txt",
+        "FOO=bar",
+      ].join("\n") + "\n",
     );
-    const p = write(".env.dev", `SSH_KEY_PATH=${keyFile}\n`);
+    let err: Error | null = null;
+    try {
+      parseEnvFile(p);
+    } catch (e) {
+      err = e as Error;
+    }
+    expect(err).not.toBeNull();
+    expect(err!.message).toMatch(/2 file reference\(s\)/);
+    expect(err!.message).toMatch(/B_PATH/);
+    expect(err!.message).toMatch(/C_FILE/);
+  });
+
+  test("placeholder expansion applies to plain (non-path) values too", () => {
+    const p = write(
+      ".env.dev",
+      `WORK_DIR=\${VAULT_ROOT}/sub\nHOME_DIR=~/x\n`,
+    );
     const { tasks } = parseEnvFile(p);
     expect(tasks).toEqual([
-      {
-        key: "SSH_PRIVATE_KEY",
-        value:
-          "-----BEGIN PRIVATE KEY-----\nabcd\n-----END PRIVATE KEY-----\n",
-      },
+      { key: "WORK_DIR", value: join(dir, "sub") },
+      { key: "HOME_DIR", value: join(homedir(), "x") },
     ]);
   });
 
-  test("missing SSH key file warns but does not throw", () => {
-    const p = write(".env.dev", `SSH_KEY_PATH=${join(dir, "missing")}\nFOO=bar\n`);
+  test("${HOME} placeholder expands", () => {
+    const p = write(".env.dev", `FOO=\${HOME}/bar\n`);
     const { tasks } = parseEnvFile(p);
-    expect(tasks).toEqual([{ key: "FOO", value: "bar" }]);
+    expect(tasks).toEqual([{ key: "FOO", value: join(homedir(), "bar") }]);
   });
 
   test("ignores lines without `=`", () => {
@@ -109,7 +165,15 @@ describe("parseEnvFile", () => {
     expect(tasks).toEqual([{ key: "FOO", value: "bar" }]);
   });
 
-  test("throws when file missing", () => {
+  test("throws when env file missing", () => {
     expect(() => parseEnvFile(join(dir, ".env.nope"))).toThrow(/not found/);
+  });
+
+  test("a bare `_PATH=` value is treated as plain (no name to strip into)", () => {
+    // edge case: key is literally `_PATH` — stripping leaves "" which is invalid;
+    // we keep the original as a plain value rather than pushing an empty-key task.
+    const p = write(".env.dev", `_PATH=raw\n`);
+    const { tasks } = parseEnvFile(p);
+    expect(tasks).toEqual([{ key: "_PATH", value: "raw" }]);
   });
 });
