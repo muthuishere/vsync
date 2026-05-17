@@ -4,10 +4,10 @@ layout: home
 hero:
   name: Vsync
   text: Secrets your team actually shares.
-  tagline: One encrypted vault for your environment secrets — shared across your team, mirrored to GitHub & GCP, audited every time someone touches it.
+  tagline: One encrypted vault for your environment secrets — shared across your team, mirrored to GH / GCP / AWS / Azure / Vault, audited every time someone touches it.
   image:
     src: /vsync-flow.png
-    alt: How vsync flows — owner vault → push → S3/MinIO with audit.csv → pull → teammate vault, with `vsync use` linking ./.env and `vsync sync` fanning out to GitHub / GCP
+    alt: How vsync flows — owner vault → push → S3/MinIO with audit.csv → pull → teammate vault, with `vsync use` linking ./.env and `vsync sync` fanning out to GitHub / GCP / AWS / Azure / Vault
   actions:
     - theme: brand
       text: Get started
@@ -31,7 +31,7 @@ features:
     details: '`vsync export <env>` mints a `.share` file. Send it on one channel, the passphrase on another. Teammate imports + pulls — they''re live in 30 seconds.'
   - icon: ↗️
     title: Fanout to where prod runs
-    details: '`vsync sync <env> gh` / `vsync sync <env> gcp` pushes the same `.env.<env>` keys to GitHub Actions secrets / GCP Secret Manager. One edit; both stay in step.'
+    details: '`vsync sync <env> <gh|gcp|aws|azure|vault>` pushes the same `.env.<env>` keys to any of five backends — GitHub Actions, GCP Secret Manager, AWS Secrets Manager, Azure Key Vault, or HashiCorp Vault KV v2. One edit in the vault; every target stays in step.'
   - icon: 📜
     title: Append-only audit log
     details: Every push / pull / import / export records `who, where, when, version, free-form note` to a CSV on the bucket. `vsync audit <env>` prints it. CI tags rows with `--note="run #1234"`.

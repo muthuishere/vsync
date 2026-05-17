@@ -20,7 +20,7 @@
 ## What's outside the perimeter
 
 - **Bucket IAM / access logs.** vsync writes to S3 but doesn't manage who can write. You set IAM at the cloud provider. Per-user S3 access keys per teammate is the recommended pattern — gives you bucket-side audit logs (separate from vsync's `audit.csv`).
-- **GitHub / GCP secret stores.** What `vsync sync` writes to those lives under their IAM. vsync only fans out; it doesn't poll back.
+- **External secret stores** (GitHub Actions, GCP Secret Manager, AWS Secrets Manager, Azure Key Vault, HashiCorp Vault). What `vsync sync` writes to each lives under the destination's own IAM / ACL. vsync only fans out; it doesn't poll back.
 - **Backup / disaster recovery.** Your S3 bucket's lifecycle policy decides how long old versions stick around. vsync doesn't auto-delete versions.
 - **TLS to the bucket.** Set `useSsl: true` in the per-(repo, env) config (default). vsync doesn't pin certs — trusts the system trust store.
 

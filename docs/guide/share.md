@@ -83,4 +83,4 @@ See also: [Audit log](/guide/audit) — the audit trail surfaces who exported wh
 
 ---
 
-[Next: Fanout to GitHub / GCP →](/guide/sync)
+[Next: Fanout to where prod runs →](/guide/sync)

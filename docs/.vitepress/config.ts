@@ -4,7 +4,7 @@ export default defineConfig({
   title: "Vsync",
   titleTemplate: ":title — Vsync",
   description:
-    "One encrypted vault for your environment secrets, shared across your team, mirrored to GitHub & GCP, audited every time someone touches it.",
+    "One encrypted vault for your environment secrets, shared across your team, mirrored to GH / GCP / AWS / Azure / Vault, audited every time someone touches it.",
   base: "/vsync/",
   cleanUrls: true,
   lastUpdated: true,
@@ -16,7 +16,7 @@ export default defineConfig({
       { text: "Guide", link: "/guide/quickstart" },
       { text: "Architecture", link: "/architecture/mental-model" },
       {
-        text: "0.7.1",
+        text: "0.8.0",
         items: [
           { text: "Changelog", link: "/guide/versioning" },
           { text: "npm", link: "https://www.npmjs.com/package/@muthuishere/vsync" },
@@ -46,7 +46,7 @@ export default defineConfig({
           text: "Teams & deployment",
           items: [
             { text: "Onboarding teammates", link: "/guide/share" },
-            { text: "Fanout to GitHub / GCP", link: "/guide/sync" },
+            { text: "Fanout to where prod runs", link: "/guide/sync" },
             { text: "Audit log", link: "/guide/audit" },
           ],
         },

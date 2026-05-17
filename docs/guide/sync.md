@@ -1,15 +1,18 @@
-# Fanout to GitHub / GCP
+# Fanout to where prod runs
 
-Once your vault is the source of truth, `vsync sync <env> <target>` pushes the KVs in `<vaultFolder>/.env.<env>` to where production actually runs.
+Once your vault is the source of truth, `vsync sync <env> <target>` pushes the KVs in `<vaultFolder>/.env.<env>` to where production actually runs. As of v0.8 there are five first-class targets:
 
 ```bash
 vsync sync dev gh                       # GitHub Actions repo secrets
 vsync sync dev gcp                      # GCP Secret Manager
+vsync sync dev aws                      # AWS Secrets Manager
+vsync sync dev azure                    # Azure Key Vault
+vsync sync dev vault                    # HashiCorp Vault KV v2
 ```
 
-**One target per invocation.** If you need both, run two commands. (The fold-in `all` target was removed in v0.7.1 — same no-magic theme as the v0.7 parser: the operator names what runs.)
+**One target per invocation.** If you need more than one, run more than one command. (The fold-in `all` target was removed in v0.7.1 — same no-magic theme as the v0.7 parser: the operator names what runs.)
 
-Auth is **outside vsync's scope** — the lib trusts whatever `gh` and `gcloud` are doing on your machine. Make sure you've run `gh auth login` / `gcloud auth login` first.
+Auth is **outside vsync's scope** — the lib trusts whatever `gh`, `gcloud`, `aws`, `az`, or `vault` are doing on your machine. Run the relevant `<tool> auth login` / `<tool> login` first.
 
 ## How sync works
 
@@ -76,6 +79,75 @@ Two lines per run, zero ambiguity about why a key was or wasn't pushed.
 4. Requires `gcloud` CLI installed and `gcloud auth login` done.
 5. **Per-env isolation** comes from per-env GCP **projects** (dev project ≠ prod project) — secret names are flat within a project. Don't try to sync dev and prod into the same project.
 
+## `vsync sync <env> aws`
+
+1. Resolves `sync.aws.region` (required) and `sync.aws.secretPrefix` (optional) from per-(repo, env) config, or `--aws-region=<region>` / `--aws-secret-prefix=<prefix>` flags, or first-run prompt that saves the answer.
+2. Same env-file parse.
+3. For each KV, in a 6-worker pool: `aws secretsmanager describe-secret --secret-id <prefix><KEY> --region <region>`. Exit 0 → secret exists, do `aws secretsmanager put-secret-value …`. Non-zero → secret is new, do `aws secretsmanager create-secret …`. Value passed via stdin (`--secret-string fileb:///dev/stdin`).
+4. Requires `aws` CLI installed and credentials available — `aws configure`, `aws sso login`, or `AWS_*` env vars. vsync trusts whatever the AWS CLI resolves; it doesn't manage credentials.
+5. AWS Secrets Manager accepts `/_+=.@-` plus alphanumeric, so typical `SCREAMING_SNAKE_CASE` keys work as-is. Use `--aws-secret-prefix=myapp/prod/` to namespace per-env when one AWS account holds multiple environments.
+
+```bash
+vsync sync production aws \
+  --aws-region=us-east-1 \
+  --aws-secret-prefix=myapp/prod/ \
+  --inline-file-suffix=_PATH \
+  --inline-file-suffix=_FILE \
+  --exclude-property=GITHUB_TOKEN \
+  --exclude-property=GOOGLE_APPLICATION_CREDENTIALS
+```
+
+## `vsync sync <env> azure`
+
+1. Resolves `sync.azure.vaultName` (required) — pass the **vault name**, not the URL — from per-(repo, env) config, or `--azure-vault=<vault-name>` flag, or first-run prompt.
+2. Same env-file parse.
+3. For each KV, in a 6-worker pool: `az keyvault secret set --vault-name <vault> --name <KEY> --file /dev/stdin`. The command is idempotent — it creates if missing, adds a new version if present. No describe-first dance.
+4. Requires `az` CLI installed and `az login` already done.
+
+**Naming constraint — Azure Key Vault only allows `0-9 A-Z a-z -`.** Underscores fail at push time with an `az` CLI error. **Per the no-magic theme, vsync does not silently translate `_` → `-`.** The operator has three options:
+
+- **Rename keys in `.env.<env>`** so they only use the allowed character set (e.g. `DB-URL` instead of `DB_URL`).
+- **Skip the offending keys** with `--exclude-property=<key>` (repeatable) — useful when only a couple of keys are problematic and the rest of the env file should still ship to Azure.
+- **Maintain a separately-shaped env file** for Azure if your shared `.env.<env>` is committed to using underscores for gh/gcp/aws.
+
+A future `--key-translate=<from>:<to>` parser flag may land if there's demand; it's explicitly out of scope for v0.8.
+
+```bash
+vsync sync production azure \
+  --azure-vault=myapp-prod-kv \
+  --inline-file-suffix=_PATH \
+  --inline-file-suffix=_FILE \
+  --exclude-property=GITHUB_TOKEN \
+  --exclude-property=GOOGLE_APPLICATION_CREDENTIALS
+```
+
+## `vsync sync <env> vault`
+
+1. Resolves `sync.vault.addr`, `sync.vault.mount`, and `sync.vault.secretPath` (all required) from per-(repo, env) config, or `--vault-addr=<url>` / `--vault-mount=<mount>` / `--vault-path=<path>` flags, or first-run prompt.
+2. Same env-file parse.
+3. **Single bulk write — the 6-worker pool is bypassed.** All KVs land in one atomic `vault kv put`:
+
+   ```
+   VAULT_ADDR=<addr> vault kv put -mount=<mount> <secretPath> KEY1=value1 KEY2=value2 …
+   ```
+
+   KV v2 is path-atomic — either the whole map lands or none of it does. There is no per-key partial-success state to surface, so vsync's summary is all-or-nothing per invocation.
+
+4. Requires `vault` CLI installed and `vault login` already done (token in `~/.vault-token`).
+
+**Scope: KV v2 only.** KV v1, Transit, PKI, Vault namespaces, and Enterprise features are not supported. A future patch will switch to `@file.json` mode if the per-env KV map ever bumps into `ARG_MAX` (~2 MiB on Linux); v0.8 lets `E2BIG` surface loudly if you ever hit it.
+
+```bash
+vsync sync production vault \
+  --vault-addr=https://vault.example.com \
+  --vault-mount=secret \
+  --vault-path=myapp/production \
+  --inline-file-suffix=_PATH \
+  --inline-file-suffix=_FILE \
+  --exclude-property=GITHUB_TOKEN \
+  --exclude-property=GOOGLE_APPLICATION_CREDENTIALS
+```
+
 ## File references in `.env.<env>` — explicit opt-in
 
 When you pass `--inline-file-suffix=<suffix>`, any key in `.env.<env>` ending in that suffix is treated as a **file reference**. Vsync reads the file from disk and pushes its contents as the secret value, under the key with the suffix stripped.
@@ -134,8 +206,11 @@ The policy header lists every exclude rule that was in effect, and the run outpu
 
 - `sync.gh.repo` — `<owner>/<repo>` for GitHub Actions
 - `sync.gcp.project` — project ID for GCP Secret Manager
+- `sync.aws.region` + `sync.aws.secretPrefix` — region (required) + optional name prefix for AWS Secrets Manager
+- `sync.azure.vaultName` — Azure Key Vault name (not URL)
+- `sync.vault.addr` + `sync.vault.mount` + `sync.vault.secretPath` — Vault server URL + KV v2 mount + path
 
-First run prompts and saves. Subsequent runs are zero-prompt. Override per-invocation with `--gh-repo=<owner/name>` or `--gcp-project=<id>`.
+First run for each target prompts and saves. Subsequent runs are zero-prompt. Override per-invocation with the matching flag — `--gh-repo`, `--gcp-project`, `--aws-region`, `--aws-secret-prefix`, `--azure-vault`, `--vault-addr`, `--vault-mount`, `--vault-path`.
 
 As of v0.7, **routing lives only in config** — the in-env routing keys `GITHUB_REPO` and `GCP_PROJECT_ID` are no longer recognized by the parser. If those lines still exist in your `.env.<env>` files, they're now plain KVs and (unless `--exclude-property`'d) will be pushed. Delete them once routing is stored via the config.
 

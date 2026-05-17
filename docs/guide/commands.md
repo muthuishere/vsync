@@ -80,25 +80,32 @@ List `s3://<bucket>/<repo>/<env>/versions/`. One line per version with size + ag
 
 ## external fanout
 
-### `sync <env> <gh|gcp>`
+### `sync <env> <gh|gcp|aws|azure|vault>`
 
-Read `<vaultFolder>/.env.<env>` → push each KV to the named target. **One target per invocation** — if you need both `gh` and `gcp`, run twice. Parallel (6 workers, 10-min timeout). First run prompts for routing config and saves it; subsequent runs zero-prompt. See [Fanout to GitHub / GCP](/guide/sync).
+Read `<vaultFolder>/.env.<env>` → push each KV to the named target. **One target per invocation** — if you need more than one, run more than one command. gh / gcp / aws / azure run in a 6-worker pool with a 10-min timeout; `vault` writes the whole map in a single atomic `vault kv put` (KV v2 is path-atomic). First run for a given target prompts for routing config and saves it; subsequent runs zero-prompt. See [Fanout to where prod runs](/guide/sync) for per-backend details and [v0.8 spec](/specs/v0.8-multi-target-sync) for the rationale.
 
-The parser has **zero implicit policy** as of v0.7 — every rule is named at the call site. Before pushing, sync prints the active parser policy header so the operator can see exactly which suffixes and exclusions were in effect for the run (empty lists print `(none — file refs disabled)` / `(none — nothing skipped)`). See [v0.7 spec §4](/specs/v0.7-explicit-sync-parser#_4-visibility-sync-prints-its-policy).
+The parser has **zero implicit policy** as of v0.7 — every rule is named at the call site, and the same parser policy applies uniformly across all five targets. Before pushing, sync prints the active parser policy header so the operator can see exactly which suffixes and exclusions were in effect for the run (empty lists print `(none — file refs disabled)` / `(none — nothing skipped)`). See [v0.7 spec §4](/specs/v0.7-explicit-sync-parser#_4-visibility-sync-prints-its-policy).
 
 ```
---inline-file-suffix=<suf> repeatable; suffix that turns a key into a file
-                           reference (e.g. --inline-file-suffix=_PATH).
-                           Empty list = no file inlining at all.
---exclude-property=<key>   repeatable; key to skip entirely (never pushed).
-                           Empty list = nothing skipped.
---gh-repo=<owner/name>     stored in cfg.sync.gh.repo
---gcp-project=<id>         stored in cfg.sync.gcp.project
+--inline-file-suffix=<suf>     repeatable; suffix that turns a key into a file
+                               reference (e.g. --inline-file-suffix=_PATH).
+                               Empty list = no file inlining at all.
+--exclude-property=<key>       repeatable; key to skip entirely (never pushed).
+                               Empty list = nothing skipped.
+
+--gh-repo=<owner/name>         stored in cfg.sync.gh.repo
+--gcp-project=<id>             stored in cfg.sync.gcp.project
+--aws-region=<region>          stored in cfg.sync.aws.region          (required for aws)
+--aws-secret-prefix=<prefix>   stored in cfg.sync.aws.secretPrefix    (optional)
+--azure-vault=<vault-name>     stored in cfg.sync.azure.vaultName     (vault NAME, not URL)
+--vault-addr=<url>             stored in cfg.sync.vault.addr          (required for vault)
+--vault-mount=<mount>          stored in cfg.sync.vault.mount         (KV v2 mount)
+--vault-path=<path>            stored in cfg.sync.vault.secretPath
 ```
 
 Both `--inline-file-suffix` and `--exclude-property` are **repeated, not comma-separated** — one value per flag occurrence. Each occurrence appends to the list. There is no `--no-…` negation flag; absence of a flag is the off state.
 
-The four-flag invocation that matches v0.6 behavior:
+The four-flag invocation below shows the `gh` shape with the v0.6-default behavior preserved; the [v0.8 spec](/specs/v0.8-multi-target-sync) §3–5 has per-backend recipes for `aws`, `azure`, and `vault`:
 
 ```bash
 vsync sync dev gh \

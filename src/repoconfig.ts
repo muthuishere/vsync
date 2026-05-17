@@ -32,6 +32,9 @@ export type ConfigFile = {
   sync?: {
     gh?: { repo: string };
     gcp?: { project: string };
+    aws?: { region: string; secretPrefix?: string };
+    azure?: { vaultName: string };
+    vault?: { addr: string; mount: string; secretPath: string };
   };
   // Optional audit-log block. Absent on disk → defaults to `{ enabled: true }`
   // (audit is on by default — see SPEC-v0.4 §9). Explicit `{ enabled: false }`
@@ -169,6 +172,42 @@ export function validateConfigFile(cfg: unknown): asserts cfg is ConfigFile {
     }
     if (c.sync.gcp !== undefined && (!c.sync.gcp.project || typeof c.sync.gcp.project !== "string")) {
       throw new Error("config: sync.gcp.project must be a string if sync.gcp is present");
+    }
+    if (c.sync.aws !== undefined) {
+      if (typeof c.sync.aws !== "object" || c.sync.aws === null) {
+        throw new Error("config: sync.aws must be an object if present");
+      }
+      if (!c.sync.aws.region || typeof c.sync.aws.region !== "string") {
+        throw new Error("config: sync.aws.region must be a string if sync.aws is present");
+      }
+      if (
+        c.sync.aws.secretPrefix !== undefined &&
+        typeof c.sync.aws.secretPrefix !== "string"
+      ) {
+        throw new Error("config: sync.aws.secretPrefix must be a string if present");
+      }
+    }
+    if (c.sync.azure !== undefined) {
+      if (typeof c.sync.azure !== "object" || c.sync.azure === null) {
+        throw new Error("config: sync.azure must be an object if present");
+      }
+      if (!c.sync.azure.vaultName || typeof c.sync.azure.vaultName !== "string") {
+        throw new Error("config: sync.azure.vaultName must be a string if sync.azure is present");
+      }
+    }
+    if (c.sync.vault !== undefined) {
+      if (typeof c.sync.vault !== "object" || c.sync.vault === null) {
+        throw new Error("config: sync.vault must be an object if present");
+      }
+      if (!c.sync.vault.addr || typeof c.sync.vault.addr !== "string") {
+        throw new Error("config: sync.vault.addr must be a string if sync.vault is present");
+      }
+      if (!c.sync.vault.mount || typeof c.sync.vault.mount !== "string") {
+        throw new Error("config: sync.vault.mount must be a string if sync.vault is present");
+      }
+      if (!c.sync.vault.secretPath || typeof c.sync.vault.secretPath !== "string") {
+        throw new Error("config: sync.vault.secretPath must be a string if sync.vault is present");
+      }
     }
   }
   if (c.audit !== undefined) {

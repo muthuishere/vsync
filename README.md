@@ -1,6 +1,6 @@
 # vsync
 
-**One encrypted vault for your environment secrets, shared across your team, mirrored to GitHub & GCP, audited every time someone touches it.**
+**One encrypted vault for your environment secrets, shared across your team, mirrored to GitHub / GCP / AWS / Azure / HashiCorp Vault, audited every time someone touches it.**
 
 ![vsync flow](https://raw.githubusercontent.com/muthuishere/vsync/main/docs/public/vsync-flow.png)
 
@@ -11,7 +11,7 @@ vsync keeps the `.env` you already write, and turns it into a real vault:
 - **One folder per environment.** Anything secret — `.env.dev`, `gcp-sa.json`, TLS certs, regression fixtures, signing keys — lives under `infra/vault/<env>/`. No naming convention to learn; whatever is in there gets sealed.
 - **Encrypted bucket as the canonical store.** `vsync push <env>` zips the folder, seals it with AES-256-GCM + manifest-anti-rollback, uploads to any S3-compatible bucket: **AWS S3, Hetzner Object Storage, self-hosted MinIO, Cloudflare R2, Backblaze B2**. The bucket holds the only blessed copy.
 - **One-passphrase onboarding.** New teammate runs `vsync import dev <file>.share`, types the passphrase you sent on a separate channel, runs `vsync pull dev`. Done. No shell-rc edits, no env-var blobs, no key sharing in Slack DMs.
-- **Fanout to where prod actually runs.** `vsync sync dev gh` and `vsync sync dev gcp` push the same `.env.<env>` keys to GitHub Actions secrets / GCP Secret Manager. One edit in the vault; both stay in step.
+- **Fanout to where prod actually runs.** `vsync sync dev <target>` pushes the same `.env.<env>` keys to GitHub Actions secrets, GCP Secret Manager, AWS Secrets Manager, Azure Key Vault, or HashiCorp Vault KV v2. One edit in the vault; every place that needs the secret stays in step.
 - **Append-only audit log.** Every push/pull/import/export records `who, where, when, version, free-form note` to a CSV on the bucket. `vsync audit dev` prints it. CI passes `--note="run #1234"` and it shows up.
 - **Per-machine key in the OS keychain.** `Bun.secrets` — macOS Keychain, Linux libsecret, Windows Credential Manager. The S3 bucket alone is useless; the key alone is useless. Both halves required to decrypt.
 
@@ -31,7 +31,7 @@ Whatever your app needs at runtime that you'd otherwise scatter across Slack DMs
 ```
 infra/vault/
   dev/
-    .env.dev                  # KV secrets — vsync sync ships these to gh/gcp
+    .env.dev                  # KV secrets — vsync sync ships these to gh/gcp/aws/azure/vault
     gcp-sa.json               # JSON service account key
     regression-fixture.json   # test data that mirrors prod shape
     tls/cert.pem
@@ -41,7 +41,7 @@ infra/vault/
     gcp-sa.json
 ```
 
-vsync doesn't care what's in there — it zips and seals the whole folder. The `.env.<env>` file is special only in that `vsync sync` reads it for KV fanout to GitHub / GCP. Everything else (JSON keys, certs, regression fixtures, anything binary) just rides along in the encrypted bundle and lands back on every teammate's disk after `pull`.
+vsync doesn't care what's in there — it zips and seals the whole folder. The `.env.<env>` file is special only in that `vsync sync` reads it for KV fanout to GitHub / GCP / AWS / Azure / Vault. Everything else (JSON keys, certs, regression fixtures, anything binary) just rides along in the encrypted bundle and lands back on every teammate's disk after `pull`.
 
 So regression tests, scripts, or any tool that needs real-shape inputs read directly from `infra/vault/<env>/whatever.json` — no separate test-data dance.
 
@@ -169,12 +169,15 @@ vsync pull dev
 # See what versions exist on S3:
 vsync versions dev
 
-# Push secrets out to GitHub / GCP:
-vsync sync dev gh
-vsync sync dev gcp
+# Push secrets out — one target per invocation:
+vsync sync dev gh                       # GitHub Actions repo secrets
+vsync sync dev gcp                      # GCP Secret Manager
+vsync sync dev aws                      # AWS Secrets Manager
+vsync sync dev azure                    # Azure Key Vault
+vsync sync dev vault                    # HashiCorp Vault KV v2
 ```
 
-One target per `vsync sync` invocation — if you need both, run twice. `pull` makes a local backup at `~/.config/vsync/backups/<env>-<ts>.zip.enc` before overwriting (two-deep rolling buffer). See "Recovering a local backup" below if you ever need one.
+One target per `vsync sync` invocation — if you need more than one, run more than one command. `pull` makes a local backup at `~/.config/vsync/backups/<env>-<ts>.zip.enc` before overwriting (two-deep rolling buffer). See "Recovering a local backup" below if you ever need one.
 
 ---
 
@@ -193,7 +196,7 @@ Every command works fully via flags or fully via prompts.
 | `push <env>` | Zip the resolved vault folder → manifest-seal → AES-256-GCM encrypt → upload to `s3://<bucket>/<repo>/<env>/versions/<ts>.enc`, then update `s3://<bucket>/<repo>/<env>/latest`. Flags: `--no-audit`, `--note=<text>`, `--meta key=value` (repeatable). |
 | `pull <env>` | Read `latest` pointer → download version → verify embedded manifest timestamp matches pointer (anti-rollback) → decrypt → unzip into the resolved vault folder. Auto-backs up existing contents first. Flags: `--no-audit`, `--note=<text>`, `--meta key=value` (repeatable). |
 | `versions <env>` | List `s3://<bucket>/<repo>/<env>/versions/`. One line per version with size + age, `* latest` marker on the active one. Read-only; no decrypt. |
-| `sync <env> <gh\|gcp>` | Read `<vaultFolder>/.env.<env>` → push each KV to the named target. **One target per invocation** — if you need both, run twice. Parallel (6 workers, 10-min timeout). First run prompts for routing config (gh repo / gcp project) and saves it; subsequent runs zero-prompt. Parser has no defaults — pass `--inline-file-suffix=<suf>` and `--exclude-property=<key>` (both repeatable) to control file inlining and excluded keys; see "Typical `vsync sync` invocation" below. Flags: `--inline-file-suffix=<suf>`, `--exclude-property=<key>`, `--gh-repo=<owner/name>`, `--gcp-project=<id>`. |
+| `sync <env> <gh\|gcp\|aws\|azure\|vault>` | Read `<vaultFolder>/.env.<env>` → push each KV to the named target. **One target per invocation** — if you need more than one, run more than one command. gh / gcp / aws / azure run in a 6-worker pool (10-min timeout); `vault` writes the whole map in a single atomic `vault kv put` (KV v2 is path-atomic). First run for a given target prompts for routing config and saves it; subsequent runs zero-prompt. Parser has no defaults — pass `--inline-file-suffix=<suf>` and `--exclude-property=<key>` (both repeatable) to control file inlining and excluded keys; see "Typical `vsync sync` invocation" below. Flags: `--inline-file-suffix=<suf>`, `--exclude-property=<key>`, `--gh-repo=<owner/name>`, `--gcp-project=<id>`, `--aws-region=<region>`, `--aws-secret-prefix=<prefix>`, `--azure-vault=<vault-name>`, `--vault-addr=<url>`, `--vault-mount=<mount>`, `--vault-path=<path>`. |
 | `audit <env>` | Print the S3-side audit log: who/where/when of every pull/push/import/export. Flags: `--limit=N`, `--all`, `--csv`. |
 | `docs` | Print a short onboarding reference (commands, vault layout, backup recovery procedure) to stdout. Pipe wherever you want — e.g. `vsync docs > infra/AGENTS.md`. |
 
@@ -259,9 +262,9 @@ Two honesty bullets:
 
 ---
 
-## How sync works (gh + gcp)
+## How sync works (gh + gcp + aws + azure + vault)
 
-Auth is **outside vsync's scope** — the lib trusts whatever `gh` and `gcloud` are doing on your machine.
+Auth is **outside vsync's scope** — the lib trusts whatever `gh`, `gcloud`, `aws`, `az`, and `vault` are doing on your machine.
 
 **`vsync sync <env> gh`:**
 1. Resolves `sync.gh.repo` from per-repo config (or `--gh-repo` flag, or first-run prompt).
@@ -275,13 +278,31 @@ Auth is **outside vsync's scope** — the lib trusts whatever `gh` and `gcloud` 
 3. For each KV: `gcloud secrets describe <KEY> --project=<proj>` to check existence; either `gcloud secrets versions add <KEY>` (exists) or `gcloud secrets create <KEY> --replication-policy=automatic` (new). Value on stdin via `--data-file=-`.
 4. Requires `gcloud` CLI installed and `gcloud auth login` done. Per-env isolation comes from per-env GCP projects (dev project ≠ prod project) — secret names are flat within a project.
 
-**One target per invocation** as of v0.7.1 — if you need both `gh` and `gcp`, run twice. Per-secret push failures within a single run don't abort siblings; the final summary lists what failed. Parse-time failures (see "all-or-none" below) abort the whole run before any push.
+**`vsync sync <env> aws`:**
+1. Resolves `sync.aws.region` (required) and `sync.aws.secretPrefix` (optional) from per-repo config (or `--aws-region` / `--aws-secret-prefix` flags, or first-run prompt).
+2. Same parse step.
+3. For each KV in a 6-worker pool: `aws secretsmanager describe-secret --secret-id <prefix><KEY> --region <region>`; either `put-secret-value` (exists) or `create-secret` (new). Value via stdin (`--secret-string fileb:///dev/stdin`).
+4. Requires `aws` CLI installed and credentials available — `aws configure`, `aws sso login`, or `AWS_*` env vars.
+
+**`vsync sync <env> azure`:**
+1. Resolves `sync.azure.vaultName` from per-repo config (or `--azure-vault` flag, or first-run prompt). Pass the vault **name**, not the URL.
+2. Same parse step.
+3. For each KV in a 6-worker pool: `az keyvault secret set --vault-name <vault> --name <KEY> --file /dev/stdin` — idempotent (creates or versions in one call).
+4. Requires `az` CLI installed and `az login` done. **Naming constraint:** Azure Key Vault only allows `0-9 A-Z a-z -`. Underscores fail at push time; vsync does not silently translate `_` → `-` (no-magic theme). Rename keys, `--exclude-property` them, or maintain an Azure-shaped env file.
+
+**`vsync sync <env> vault`:**
+1. Resolves `sync.vault.addr`, `sync.vault.mount`, and `sync.vault.secretPath` (all required) from per-repo config (or `--vault-addr` / `--vault-mount` / `--vault-path` flags, or first-run prompt).
+2. Same parse step.
+3. **Single bulk write — the 6-worker pool is bypassed.** All KVs land in one atomic call: `VAULT_ADDR=<addr> vault kv put -mount=<mount> <secretPath> KEY1=value1 KEY2=value2 …`. KV v2 is path-atomic — either the whole map lands or none of it does.
+4. Requires `vault` CLI installed and `vault login` already done (token in `~/.vault-token`). KV v2 only; KV v1 / Transit / PKI / namespaces are out of scope.
+
+**One target per invocation** as of v0.7.1 — if you need more than one, run more than one command. For gh / gcp / aws / azure, per-secret push failures within a single run don't abort siblings; the final summary lists what failed. `vault` is all-or-nothing per invocation (atomic). Parse-time failures (see "all-or-none" below) abort the whole run before any push for every target.
 
 Every run also prints the active parser policy header before the first push, so the operator can see which suffixes and exclusions were in effect for this invocation.
 
 ### File-reference convention (`.env.<env>`) — explicit opt-in
 
-Vsync reads each line of `.env.<env>` and pushes a KV to gh/gcp. When you pass `--inline-file-suffix=<suffix>`, keys ending in that suffix are treated as file paths — vsync reads the file and pushes its bytes under the stripped name.
+Vsync reads each line of `.env.<env>` and pushes a KV to the chosen target (gh / gcp / aws / azure / vault). When you pass `--inline-file-suffix=<suffix>`, keys ending in that suffix are treated as file paths — vsync reads the file and pushes its bytes under the stripped name.
 
 With `--inline-file-suffix=_PATH --inline-file-suffix=_FILE` in effect:
 
@@ -359,7 +380,9 @@ In practice, just don't lose the keychain entry. `pull` itself is the recovery p
 
 | Release | What's in it |
 |---|---|
-| **0.7.0** | `vsync sync` parser has zero implicit policy. New repeatable flags `--inline-file-suffix=<suf>` and `--exclude-property=<key>` replace the old hardcoded `_PATH` / `_FILE` suffixes and the implicit `GITHUB_TOKEN` / `GOOGLE_APPLICATION_CREDENTIALS` skip-list — name every rule at the call site. In-env routing keys `GITHUB_REPO` / `GCP_PROJECT_ID` are no longer recognized (routing lives in config only). Every run prints the active policy header before pushing. Two intentional breaks vs. 0.6.x — see [`docs/specs/v0.7-explicit-sync-parser.md`](docs/specs/v0.7-explicit-sync-parser.md) §5. |
+| **0.8.0** | Three new `vsync sync` targets: `aws` (AWS Secrets Manager), `azure` (Azure Key Vault), `vault` (HashiCorp Vault KV v2). Dispatcher rewritten around a `TargetHandler` registry — `gh` / `gcp` move into the registry unchanged, three new handlers land alongside. **Purely additive — every 0.7.x invocation works byte-for-byte in 0.8.0.** New flags per target: `--aws-region`, `--aws-secret-prefix`, `--azure-vault`, `--vault-addr`, `--vault-mount`, `--vault-path`. gh / gcp / aws / azure share the 6-worker pool; `vault` writes the whole map in one atomic `vault kv put`. Wire format / audit log / parser policy unchanged. See [`docs/specs/v0.8-multi-target-sync.md`](docs/specs/v0.8-multi-target-sync.md). |
+| 0.7.1 | `vsync sync <env> all` removed. Only `gh` and `gcp` remained as 0.7 targets; one target per invocation. (Now joined by `aws`, `azure`, `vault` in 0.8 — still one target per invocation.) |
+| 0.7.0 | `vsync sync` parser has zero implicit policy. New repeatable flags `--inline-file-suffix=<suf>` and `--exclude-property=<key>` replace the old hardcoded `_PATH` / `_FILE` suffixes and the implicit `GITHUB_TOKEN` / `GOOGLE_APPLICATION_CREDENTIALS` skip-list — name every rule at the call site. In-env routing keys `GITHUB_REPO` / `GCP_PROJECT_ID` are no longer recognized (routing lives in config only). Every run prints the active policy header before pushing. Two intentional breaks vs. 0.6.x — see [`docs/specs/v0.7-explicit-sync-parser.md`](docs/specs/v0.7-explicit-sync-parser.md) §5. |
 | 0.6.0 | `.env.<env>` file-reference convention: any key ending in `_PATH` / `_FILE` is read from disk and the file's contents are pushed under the stripped name. Paths anchor to `VAULT_ROOT`; `${VAULT_ROOT}` / `${HOME}` / `~/` placeholders work in every value. All-or-none on missing files. (Superseded in 0.7 — suffixes are no longer hardcoded; pass `--inline-file-suffix` explicitly.) |
 | 0.5.0 | `vsync use <env>` — symlinks `./.env` (or `--link=<path>`) at the vault's env file so `dotenv.config()` just works; switch envs with one command. README rewrite + flow diagram. |
 | 0.4.0 | Append-only audit log at `s3://<bucket>/<repo>/<env>/audit.csv` + `vsync audit` viewer. Expandable `meta` JSON cell via `--note` / `--meta` + matching env vars. |

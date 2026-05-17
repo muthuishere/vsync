@@ -81,11 +81,12 @@ vsync push dev                          # ship your changes
 
 vsync sync dev gh                       # push KVs to GitHub Actions secrets
 vsync sync dev gcp                      # … or GCP Secret Manager (run separately)
+# … or aws | azure | vault — see /guide/sync for the full set of backends
 
 vsync audit dev                         # who pushed/pulled/exported, when
 ```
 
-See [Push / pull / versions](/guide/daily), [Fanout to GitHub / GCP](/guide/sync), and [Audit log](/guide/audit) for details.
+See [Push / pull / versions](/guide/daily), [Fanout to where prod runs](/guide/sync), and [Audit log](/guide/audit) for details.
 
 ---
 
