@@ -80,8 +80,7 @@ vsync pull dev                          # pull the latest before starting work
 vsync push dev                          # ship your changes
 
 vsync sync dev gh                       # push KVs to GitHub Actions secrets
-vsync sync dev gcp                      # … or GCP Secret Manager
-vsync sync dev all                      # both
+vsync sync dev gcp                      # … or GCP Secret Manager (run separately)
 
 vsync audit dev                         # who pushed/pulled/exported, when
 ```

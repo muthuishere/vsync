@@ -1,11 +1,14 @@
 #!/usr/bin/env bun
-// Usage: vsync sync <env> <gh|gcp|all>
+// Usage: vsync sync <env> <gh|gcp>
 //          [--inline-file-suffix=<suf>] (repeatable)
 //          [--exclude-property=<key>]   (repeatable)
 //          [--gh-repo=<owner/name>] [--gcp-project=<id>] [--repo=<name>]
 //
 // Reads <vaultFolder>/.env.<env> and pushes each variable to the named
-// secret backend, in parallel (6 workers, 10-min overall timeout).
+// secret backend, in parallel (6 workers, 10-min overall timeout). One
+// target per invocation — if you need both gh and gcp, run two commands.
+// (The fold-in `all` target was removed in v0.7.1; same no-magic theme
+// as the v0.7 parser refactor — the operator names what runs.)
 //
 // Routing config lives in the per-repo vsync file (cfg.sync.gh.repo /
 // cfg.sync.gcp.project), NOT in the .env file. First run prompts for
@@ -36,7 +39,7 @@ import {
 import { resolveVaultFolder } from "../src/envconfig";
 import { askText, isTty } from "../src/prompt";
 
-const TARGETS = ["gh", "gcp", "all"] as const;
+const TARGETS = ["gh", "gcp"] as const;
 type Target = (typeof TARGETS)[number];
 
 const WORKERS = 6;
@@ -88,77 +91,67 @@ export async function main(argv: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const targets: Array<"gh" | "gcp"> =
-    target === "all" ? ["gh", "gcp"] : [target];
-
-  // Resolve + persist routing for every target we're about to run.
+  // Resolve + persist routing for the chosen target.
   let cfgMutated = false;
-  const ghRepo = targets.includes("gh")
-    ? await resolveGhRepo(cfg, flags, () => {
-        cfgMutated = true;
-      })
-    : undefined;
-  const gcpProject = targets.includes("gcp")
-    ? await resolveGcpProject(cfg, flags, () => {
-        cfgMutated = true;
-      })
-    : undefined;
+  const ghRepo =
+    target === "gh"
+      ? await resolveGhRepo(cfg, flags, () => {
+          cfgMutated = true;
+        })
+      : undefined;
+  const gcpProject =
+    target === "gcp"
+      ? await resolveGcpProject(cfg, flags, () => {
+          cfgMutated = true;
+        })
+      : undefined;
 
   if (cfgMutated) {
     await saveConfigFile(repo, env, cfg);
   }
 
-  let totalOk = 0;
-  const totalFailed: string[] = [];
-
-  for (const t of targets) {
-    const start = Date.now();
-    let result;
-    if (t === "gh") {
-      await ensureBinary("gh");
-      console.log(
-        `\nSyncing ${tasks.length} secrets to GitHub: repo=${ghRepo}, environment=${env}`,
-      );
-      printSkipped(skipped);
-      result = await runPool(tasks, WORKERS, TIMEOUT_MS, (task, signal) =>
-        setGhSecret(task, ghRepo!, env, signal),
-      );
-    } else {
-      await ensureBinary("gcloud");
-      console.log(
-        `\nSyncing ${tasks.length} secrets to GCP Secret Manager: project=${gcpProject}`,
-      );
-      printSkipped(skipped);
-      result = await runPool(tasks, WORKERS, TIMEOUT_MS, (task, signal) =>
-        setGcpSecret(task, gcpProject!, signal),
-      );
-    }
-    const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-    if (result.failed.length > 0) {
-      console.log(
-        `  ${t}: ${result.ok} ok, ${result.failed.length} failed (${result.failed.join(", ")}) in ${elapsed}s`,
-      );
-    } else {
-      console.log(`  ${t}: all ${result.ok} synced in ${elapsed}s`);
-    }
-    totalOk += result.ok;
-    totalFailed.push(...result.failed.map((k) => `${t}:${k}`));
+  const start = Date.now();
+  let result;
+  if (target === "gh") {
+    await ensureBinary("gh");
+    console.log(
+      `\nSyncing ${tasks.length} secrets to GitHub: repo=${ghRepo}, environment=${env}`,
+    );
+    printSkipped(skipped);
+    result = await runPool(tasks, WORKERS, TIMEOUT_MS, (task, signal) =>
+      setGhSecret(task, ghRepo!, env, signal),
+    );
+  } else {
+    await ensureBinary("gcloud");
+    console.log(
+      `\nSyncing ${tasks.length} secrets to GCP Secret Manager: project=${gcpProject}`,
+    );
+    printSkipped(skipped);
+    result = await runPool(tasks, WORKERS, TIMEOUT_MS, (task, signal) =>
+      setGcpSecret(task, gcpProject!, signal),
+    );
   }
+  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
 
-  if (totalFailed.length > 0) {
-    console.log(`\nDone — ${totalOk} ok, ${totalFailed.length} failed.`);
+  if (result.failed.length > 0) {
+    console.log(
+      `\n${target}: ${result.ok} ok, ${result.failed.length} failed (${result.failed.join(", ")}) in ${elapsed}s`,
+    );
     process.exit(1);
   }
-  console.log(`\n✅ All ${totalOk} secrets synced across ${targets.length} target(s).`);
+  console.log(
+    `\n✅ ${result.ok} secrets synced to ${target} in ${elapsed}s.`,
+  );
 }
 
 function usage(): void {
-  console.error("usage: vsync sync <env> <gh|gcp|all>");
+  console.error("usage: vsync sync <env> <gh|gcp>");
   console.error("");
   console.error("  env     environment name; reads <vaultFolder>/.env.<env>");
   console.error("  gh      push to GitHub repo secrets (env = <env>)");
   console.error("  gcp     push to GCP Secret Manager (project from cfg.sync.gcp.project)");
-  console.error("  all     push to every configured target");
+  console.error("");
+  console.error("  One target per invocation. For both, run twice.");
   console.error("");
   console.error("Parser policy (no defaults — pass explicitly):");
   console.error("  --inline-file-suffix=<suf>   key suffix that turns a value into a file ref (repeatable)");

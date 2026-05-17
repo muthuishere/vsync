@@ -172,10 +172,9 @@ vsync versions dev
 # Push secrets out to GitHub / GCP:
 vsync sync dev gh
 vsync sync dev gcp
-vsync sync dev all
 ```
 
-`pull` makes a local backup at `~/.config/vsync/backups/<env>-<ts>.zip.enc` before overwriting (two-deep rolling buffer). See "Recovering a local backup" below if you ever need one.
+One target per `vsync sync` invocation — if you need both, run twice. `pull` makes a local backup at `~/.config/vsync/backups/<env>-<ts>.zip.enc` before overwriting (two-deep rolling buffer). See "Recovering a local backup" below if you ever need one.
 
 ---
 
@@ -194,7 +193,7 @@ Every command works fully via flags or fully via prompts.
 | `push <env>` | Zip the resolved vault folder → manifest-seal → AES-256-GCM encrypt → upload to `s3://<bucket>/<repo>/<env>/versions/<ts>.enc`, then update `s3://<bucket>/<repo>/<env>/latest`. Flags: `--no-audit`, `--note=<text>`, `--meta key=value` (repeatable). |
 | `pull <env>` | Read `latest` pointer → download version → verify embedded manifest timestamp matches pointer (anti-rollback) → decrypt → unzip into the resolved vault folder. Auto-backs up existing contents first. Flags: `--no-audit`, `--note=<text>`, `--meta key=value` (repeatable). |
 | `versions <env>` | List `s3://<bucket>/<repo>/<env>/versions/`. One line per version with size + age, `* latest` marker on the active one. Read-only; no decrypt. |
-| `sync <env> <gh\|gcp\|all>` | Read `<vaultFolder>/.env.<env>` → push each KV to the named target. Parallel (6 workers, 10-min timeout). First run prompts for routing config (gh repo / gcp project) and saves it; subsequent runs zero-prompt. Parser has no defaults — pass `--inline-file-suffix=<suf>` and `--exclude-property=<key>` (both repeatable) to control file inlining and excluded keys; see "Typical `vsync sync` invocation" below. Flags: `--inline-file-suffix=<suf>`, `--exclude-property=<key>`, `--gh-repo=<owner/name>`, `--gcp-project=<id>`. |
+| `sync <env> <gh\|gcp>` | Read `<vaultFolder>/.env.<env>` → push each KV to the named target. **One target per invocation** — if you need both, run twice. Parallel (6 workers, 10-min timeout). First run prompts for routing config (gh repo / gcp project) and saves it; subsequent runs zero-prompt. Parser has no defaults — pass `--inline-file-suffix=<suf>` and `--exclude-property=<key>` (both repeatable) to control file inlining and excluded keys; see "Typical `vsync sync` invocation" below. Flags: `--inline-file-suffix=<suf>`, `--exclude-property=<key>`, `--gh-repo=<owner/name>`, `--gcp-project=<id>`. |
 | `audit <env>` | Print the S3-side audit log: who/where/when of every pull/push/import/export. Flags: `--limit=N`, `--all`, `--csv`. |
 | `docs` | Print a short onboarding reference (commands, vault layout, backup recovery procedure) to stdout. Pipe wherever you want — e.g. `vsync docs > infra/AGENTS.md`. |
 
@@ -276,7 +275,7 @@ Auth is **outside vsync's scope** — the lib trusts whatever `gh` and `gcloud` 
 3. For each KV: `gcloud secrets describe <KEY> --project=<proj>` to check existence; either `gcloud secrets versions add <KEY>` (exists) or `gcloud secrets create <KEY> --replication-policy=automatic` (new). Value on stdin via `--data-file=-`.
 4. Requires `gcloud` CLI installed and `gcloud auth login` done. Per-env isolation comes from per-env GCP projects (dev project ≠ prod project) — secret names are flat within a project.
 
-**`vsync sync <env> all`** runs both in sequence. Per-secret push failures don't abort siblings; final summary lists what failed. Parse-time failures (see "all-or-none" below) abort everything before any push.
+**One target per invocation** as of v0.7.1 — if you need both `gh` and `gcp`, run twice. Per-secret push failures within a single run don't abort siblings; the final summary lists what failed. Parse-time failures (see "all-or-none" below) abort the whole run before any push.
 
 Every run also prints the active parser policy header before the first push, so the operator can see which suffixes and exclusions were in effect for this invocation.
 

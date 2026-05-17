@@ -5,8 +5,9 @@ Once your vault is the source of truth, `vsync sync <env> <target>` pushes the K
 ```bash
 vsync sync dev gh                       # GitHub Actions repo secrets
 vsync sync dev gcp                      # GCP Secret Manager
-vsync sync dev all                      # both, sequentially
 ```
+
+**One target per invocation.** If you need both, run two commands. (The fold-in `all` target was removed in v0.7.1 — same no-magic theme as the v0.7 parser: the operator names what runs.)
 
 Auth is **outside vsync's scope** — the lib trusts whatever `gh` and `gcloud` are doing on your machine. Make sure you've run `gh auth login` / `gcloud auth login` first.
 
@@ -74,10 +75,6 @@ Two lines per run, zero ambiguity about why a key was or wasn't pushed.
 3. For each KV: `gcloud secrets describe <KEY> --project=<proj>` to check existence; then either `gcloud secrets versions add <KEY> …` (already exists) or `gcloud secrets create <KEY> --replication-policy=automatic …` (new). Value on stdin via `--data-file=-`.
 4. Requires `gcloud` CLI installed and `gcloud auth login` done.
 5. **Per-env isolation** comes from per-env GCP **projects** (dev project ≠ prod project) — secret names are flat within a project. Don't try to sync dev and prod into the same project.
-
-## `vsync sync <env> all`
-
-Runs both targets in sequence. A per-secret failure on one target doesn't abort the other; final summary lists what failed. **Parse-time failures** (a referenced file missing — see below) abort the whole run before any push.
 
 ## File references in `.env.<env>` — explicit opt-in
 
@@ -158,7 +155,8 @@ The vault is the source of truth. Sync runs are **idempotent** — re-syncing pu
 ```bash
 # Owner: I changed a prod secret.
 vsync push production
-vsync sync production all       # push to GH + GCP
+vsync sync production gh        # push to GitHub Actions
+vsync sync production gcp       # … then GCP Secret Manager
 
 # CI: re-sync just to be safe after a deploy.
 VSYNC_AUDIT_NOTE="post-deploy resync run-${{ github.run_id }}" \

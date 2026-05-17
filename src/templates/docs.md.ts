@@ -50,7 +50,7 @@ dotenv.config({ path: \`infra/vault/\${env}/.env.\${env}\` });
 | \`vsync push <env>\` | Encrypt the vault folder and upload to S3. |
 | \`vsync pull <env>\` | Download the latest from S3 and unzip into the vault folder (auto-backs up the existing folder first). |
 | \`vsync versions <env>\` | List the available versions on S3 (read-only, no decrypt). |
-| \`vsync sync <env> <gh\\|gcp\\|all>\` | Push the vault's \`.env.<env>\` KVs out to GitHub Repo Secrets / GCP Secret Manager. |
+| \`vsync sync <env> <gh\\|gcp>\` | Push the vault's \`.env.<env>\` KVs out to GitHub Repo Secrets / GCP Secret Manager. One target per invocation. |
 | \`vsync docs\` | Print this reference. |
 
 Every command takes \`--repo=<name>\` to override the auto-detected repo
