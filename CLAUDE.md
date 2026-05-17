@@ -11,6 +11,7 @@ Design specs live in `docs/specs/`:
 - [`v0.2-secret-lib.md`](docs/specs/v0.2-secret-lib.md) — original full spec (threat model, crypto envelope, repo-name resolution). Still the source of truth for anything not changed since.
 - [`v0.3-vsync-rebrand.md`](docs/specs/v0.3-vsync-rebrand.md) — rename + opinionated layout (vault folder at `infra/vault/<env>/`) + `sync` verb for GitHub/GCP fanout. Historical doc describing the rename from the original package name.
 - [`v0.4-audit-log.md`](docs/specs/v0.4-audit-log.md) — append-only `audit.csv` on S3, ETag-conditional protocol, expandable `meta` JSON cell.
+- [`v0.7-explicit-sync-parser.md`](docs/specs/v0.7-explicit-sync-parser.md) — `parseEnvFile` takes required `ParseOptions` (`inlineFileSuffixes`, `excludeProperties`). No module-level `LOCAL_ONLY` / `ROUTING` / `PATH_SUFFIXES` constants; no defaults applied by the CLI either. `vsync sync` reads `--inline-file-suffix=<suf>` / `--exclude-property=<key>` (both repeatable) and prints the active policy header before every run. In-env routing keys (`GITHUB_REPO`, `GCP_PROJECT_ID`) are gone — routing lives only in `cfg.sync.gh.repo` / `cfg.sync.gcp.project`.
 
 Don't duplicate spec content here — read the spec when context is missing.
 
