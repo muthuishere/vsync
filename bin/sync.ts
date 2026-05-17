@@ -8,10 +8,13 @@
 // cfg.sync.gcp.project), NOT in the .env file. First run prompts for
 // missing routing and saves it; subsequent runs are zero-prompt.
 //
-// Path-expansion + skip rules in src/envfile.ts:
-//   - GCP_SA_KEY_FILE_PATH → GCP_SA_KEY (file content)
-//   - SSH_KEY_PATH → SSH_PRIVATE_KEY (file content)
+// File-reference + skip rules in src/envfile.ts (canonical short-form ref in
+// that file's header comment; design spec in docs/specs/v0.6-vault-relative-file-refs.md):
+//   - *_PATH / *_FILE          → strip suffix, push file contents under stripped name
 //   - GITHUB_TOKEN, GOOGLE_APPLICATION_CREDENTIALS skipped (local-only)
+//   - Path resolution anchors to VAULT_ROOT (dir of the .env.<env> being parsed);
+//     ${VAULT_ROOT} / ${HOME} / leading ~/ are expanded in every value.
+//   - Any missing referenced file aborts the whole sync before any push.
 
 import { join } from "node:path";
 import { parseArgs } from "../src/argv";
