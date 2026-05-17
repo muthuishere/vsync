@@ -28,6 +28,34 @@ This is the manifest pointer-seal (`RQEM0001`) doing its job. See [Crypto envelo
 
 The key in your keychain wasn't the one used to seal the bundle. Most likely cause: someone re-`init`-ed the (repo, env), pushed a new bundle, and forgot to re-`export` for you. Get a fresh `.share` from them.
 
+## My `GITHUB_TOKEN` got pushed to GitHub Actions
+
+As of **v0.7**, vsync has no implicit excludes. A bare `vsync sync dev gh` will push every KV in `.env.<env>` — including `GITHUB_TOKEN` and `GOOGLE_APPLICATION_CREDENTIALS`. Pre-0.6 silently skipped both; that magic is gone.
+
+To restore the old behavior, name the exclusions explicitly:
+
+```bash
+vsync sync dev gh \
+  --exclude-property=GITHUB_TOKEN \
+  --exclude-property=GOOGLE_APPLICATION_CREDENTIALS
+```
+
+`--exclude-property` is repeatable — one occurrence per key. Drop the flag set into your Taskfile / CI so the policy is visible at the call site. See [v0.7 migration](/specs/v0.7-explicit-sync-parser#_5-migration-0-6-x-→-0-7-0).
+
+## My `FOO_PATH` arrived as a path string instead of file contents
+
+Same story: as of **v0.7** the `_PATH` / `_FILE` suffix-to-file rule is no longer applied automatically. A bare `vsync sync` pushes `FOO_PATH=keys/foo` as the literal string `keys/foo`.
+
+Opt in explicitly:
+
+```bash
+vsync sync dev gh \
+  --inline-file-suffix=_PATH \
+  --inline-file-suffix=_FILE
+```
+
+Repeatable — one suffix per occurrence. Add any custom suffixes your project uses (`_KEY`, `_CERT`, etc.) the same way. See [Fanout to GitHub / GCP — file references](/guide/sync#file-references-in-env-env-explicit-opt-in).
+
 ## `gh` / `gcloud` not found on PATH
 
 Install and authenticate them locally. vsync shells out; it doesn't manage external CLI auth.

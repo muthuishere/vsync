@@ -1,5 +1,8 @@
 #!/usr/bin/env bun
-// Usage: vsync sync <env> <gh|gcp|all> [--gh-repo=<owner/name>] [--gcp-project=<id>]
+// Usage: vsync sync <env> <gh|gcp|all>
+//          [--inline-file-suffix=<suf>] (repeatable)
+//          [--exclude-property=<key>]   (repeatable)
+//          [--gh-repo=<owner/name>] [--gcp-project=<id>] [--repo=<name>]
 //
 // Reads <vaultFolder>/.env.<env> and pushes each variable to the named
 // secret backend, in parallel (6 workers, 10-min overall timeout).
@@ -8,10 +11,14 @@
 // cfg.sync.gcp.project), NOT in the .env file. First run prompts for
 // missing routing and saves it; subsequent runs are zero-prompt.
 //
-// File-reference + skip rules in src/envfile.ts (canonical short-form ref in
-// that file's header comment; design spec in docs/specs/v0.6-vault-relative-file-refs.md):
-//   - *_PATH / *_FILE          → strip suffix, push file contents under stripped name
-//   - GITHUB_TOKEN, GOOGLE_APPLICATION_CREDENTIALS skipped (local-only)
+// Parser policy is explicit per-invocation (v0.7 — zero defaults; see
+// docs/specs/v0.7-explicit-sync-parser.md):
+//   - --inline-file-suffix=<suf>   keys ending in <suf> are file refs; the
+//                                  suffix is stripped and the file's bytes
+//                                  are pushed under the stripped name.
+//                                  Repeatable. Omit = no file inlining.
+//   - --exclude-property=<key>     keys to drop (never pushed). Repeatable.
+//                                  Omit = nothing skipped.
 //   - Path resolution anchors to VAULT_ROOT (dir of the .env.<env> being parsed);
 //     ${VAULT_ROOT} / ${HOME} / leading ~/ are expanded in every value.
 //   - Any missing referenced file aborts the whole sync before any push.
@@ -36,21 +43,17 @@ const WORKERS = 6;
 const TIMEOUT_MS = 10 * 60 * 1000;
 
 export async function main(argv: string[]): Promise<void> {
-  const { positional, flags } = parseArgs(argv);
+  const { positional, flags, lists } = parseArgs(argv);
   const env = positional[0];
   const target = positional[1] as Target | undefined;
 
   if (!env || !target || !TARGETS.includes(target)) {
-    console.error("usage: vsync sync <env> <gh|gcp|all>");
-    console.error("");
-    console.error("  env     environment name; reads <vaultFolder>/.env.<env>");
-    console.error("  gh      push to GitHub repo secrets (env = <env>)");
-    console.error("  gcp     push to GCP Secret Manager (project from cfg.sync.gcp.project)");
-    console.error("  all     push to every configured target");
-    console.error("");
-    console.error("Flags: --gh-repo=<owner/name>, --gcp-project=<id>, --repo=<name>");
+    usage();
     process.exit(1);
   }
+
+  const inlineFileSuffixes = lists["inline-file-suffix"] ?? [];
+  const excludeProperties = lists["exclude-property"] ?? [];
 
   const repo = await getRepoName({ override: flags.repo });
   const root = await getRepoRoot();
@@ -66,15 +69,20 @@ export async function main(argv: string[]): Promise<void> {
   const vaultFolder = resolveVaultFolder(cfg, env);
   const envFilePath = join(root, vaultFolder, `.env.${env}`);
 
+  printPolicyHeader(inlineFileSuffixes, excludeProperties);
+
   let parsed;
   try {
-    parsed = parseEnvFile(envFilePath);
+    parsed = parseEnvFile(envFilePath, {
+      inlineFileSuffixes,
+      excludeProperties,
+    });
   } catch (e) {
     console.error((e as Error).message);
     process.exit(1);
   }
 
-  const { tasks } = parsed;
+  const { tasks, skipped } = parsed;
   if (tasks.length === 0) {
     console.error(`no secrets to sync from ${envFilePath}`);
     process.exit(1);
@@ -111,6 +119,7 @@ export async function main(argv: string[]): Promise<void> {
       console.log(
         `\nSyncing ${tasks.length} secrets to GitHub: repo=${ghRepo}, environment=${env}`,
       );
+      printSkipped(skipped);
       result = await runPool(tasks, WORKERS, TIMEOUT_MS, (task, signal) =>
         setGhSecret(task, ghRepo!, env, signal),
       );
@@ -119,6 +128,7 @@ export async function main(argv: string[]): Promise<void> {
       console.log(
         `\nSyncing ${tasks.length} secrets to GCP Secret Manager: project=${gcpProject}`,
       );
+      printSkipped(skipped);
       result = await runPool(tasks, WORKERS, TIMEOUT_MS, (task, signal) =>
         setGcpSecret(task, gcpProject!, signal),
       );
@@ -140,6 +150,51 @@ export async function main(argv: string[]): Promise<void> {
     process.exit(1);
   }
   console.log(`\n✅ All ${totalOk} secrets synced across ${targets.length} target(s).`);
+}
+
+function usage(): void {
+  console.error("usage: vsync sync <env> <gh|gcp|all>");
+  console.error("");
+  console.error("  env     environment name; reads <vaultFolder>/.env.<env>");
+  console.error("  gh      push to GitHub repo secrets (env = <env>)");
+  console.error("  gcp     push to GCP Secret Manager (project from cfg.sync.gcp.project)");
+  console.error("  all     push to every configured target");
+  console.error("");
+  console.error("Parser policy (no defaults — pass explicitly):");
+  console.error("  --inline-file-suffix=<suf>   key suffix that turns a value into a file ref (repeatable)");
+  console.error("  --exclude-property=<key>     key to skip entirely (repeatable)");
+  console.error("");
+  console.error("Routing flags: --gh-repo=<owner/name>, --gcp-project=<id>, --repo=<name>");
+}
+
+/** Print the active parser policy to stdout (spec v0.7 §4.1). */
+export function printPolicyHeader(
+  inlineFileSuffixes: string[],
+  excludeProperties: string[],
+): void {
+  console.log("\nParser policy:");
+  if (inlineFileSuffixes.length === 0) {
+    console.log("  inline-file-suffix: (none — file refs disabled)");
+  } else {
+    for (const suf of inlineFileSuffixes) {
+      console.log(`  inline-file-suffix: ${suf}`);
+    }
+  }
+  if (excludeProperties.length === 0) {
+    console.log("  exclude-property:   (none — nothing skipped)");
+  } else {
+    for (const key of excludeProperties) {
+      console.log(`  exclude-property:   ${key}`);
+    }
+  }
+}
+
+function printSkipped(
+  skipped: Array<{ key: string; reason: "excluded" }>,
+): void {
+  for (const s of skipped) {
+    console.log(`  skipped (${s.reason}): ${s.key}`);
+  }
 }
 
 async function resolveGhRepo(

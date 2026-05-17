@@ -84,9 +84,28 @@ List `s3://<bucket>/<repo>/<env>/versions/`. One line per version with size + ag
 
 Read `<vaultFolder>/.env.<env>` → push each KV to the named target. Parallel (6 workers, 10-min timeout). First run prompts for routing config and saves it; subsequent runs zero-prompt. See [Fanout to GitHub / GCP](/guide/sync).
 
+The parser has **zero implicit policy** as of v0.7 — every rule is named at the call site. Before pushing, sync prints the active parser policy header so the operator can see exactly which suffixes and exclusions were in effect for the run (empty lists print `(none — file refs disabled)` / `(none — nothing skipped)`). See [v0.7 spec §4](/specs/v0.7-explicit-sync-parser#_4-visibility-sync-prints-its-policy).
+
 ```
+--inline-file-suffix=<suf> repeatable; suffix that turns a key into a file
+                           reference (e.g. --inline-file-suffix=_PATH).
+                           Empty list = no file inlining at all.
+--exclude-property=<key>   repeatable; key to skip entirely (never pushed).
+                           Empty list = nothing skipped.
 --gh-repo=<owner/name>     stored in cfg.sync.gh.repo
 --gcp-project=<id>         stored in cfg.sync.gcp.project
+```
+
+Both `--inline-file-suffix` and `--exclude-property` are **repeated, not comma-separated** — one value per flag occurrence. Each occurrence appends to the list. There is no `--no-…` negation flag; absence of a flag is the off state.
+
+The four-flag invocation that matches v0.6 behavior:
+
+```bash
+vsync sync dev gh \
+  --inline-file-suffix=_PATH \
+  --inline-file-suffix=_FILE \
+  --exclude-property=GITHUB_TOKEN \
+  --exclude-property=GOOGLE_APPLICATION_CREDENTIALS
 ```
 
 ## visibility

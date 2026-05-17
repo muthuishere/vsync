@@ -194,30 +194,47 @@ Every command works fully via flags or fully via prompts.
 | `push <env>` | Zip the resolved vault folder → manifest-seal → AES-256-GCM encrypt → upload to `s3://<bucket>/<repo>/<env>/versions/<ts>.enc`, then update `s3://<bucket>/<repo>/<env>/latest`. Flags: `--no-audit`, `--note=<text>`, `--meta key=value` (repeatable). |
 | `pull <env>` | Read `latest` pointer → download version → verify embedded manifest timestamp matches pointer (anti-rollback) → decrypt → unzip into the resolved vault folder. Auto-backs up existing contents first. Flags: `--no-audit`, `--note=<text>`, `--meta key=value` (repeatable). |
 | `versions <env>` | List `s3://<bucket>/<repo>/<env>/versions/`. One line per version with size + age, `* latest` marker on the active one. Read-only; no decrypt. |
-| `sync <env> <gh\|gcp\|all>` | Read `<vaultFolder>/.env.<env>` → push each KV to the named target. Parallel (6 workers, 10-min timeout). First run prompts for routing config (gh repo / gcp project) and saves it; subsequent runs zero-prompt. Flags: `--gh-repo=<owner/name>`, `--gcp-project=<id>`. |
+| `sync <env> <gh\|gcp\|all>` | Read `<vaultFolder>/.env.<env>` → push each KV to the named target. Parallel (6 workers, 10-min timeout). First run prompts for routing config (gh repo / gcp project) and saves it; subsequent runs zero-prompt. Parser has no defaults — pass `--inline-file-suffix=<suf>` and `--exclude-property=<key>` (both repeatable) to control file inlining and excluded keys; see "Typical `vsync sync` invocation" below. Flags: `--inline-file-suffix=<suf>`, `--exclude-property=<key>`, `--gh-repo=<owner/name>`, `--gcp-project=<id>`. |
 | `audit <env>` | Print the S3-side audit log: who/where/when of every pull/push/import/export. Flags: `--limit=N`, `--all`, `--csv`. |
 | `docs` | Print a short onboarding reference (commands, vault layout, backup recovery procedure) to stdout. Pipe wherever you want — e.g. `vsync docs > infra/AGENTS.md`. |
 
 ### `sync` env-file parsing
 
-**File references — `*_PATH` / `*_FILE`.** Any key in `.env.<env>` whose name ends in `_PATH` or `_FILE` is read from disk; vsync pushes the file's contents under the key with the suffix stripped. Examples:
+As of v0.7 the parser has **zero implicit policy** — no hardcoded suffixes, no hardcoded exclude list, no defaults applied by the CLI. Every rule is named at the call site.
+
+**File references — opt in with `--inline-file-suffix=<suf>` (repeatable).** Any key in `.env.<env>` whose name ends in a configured suffix is read from disk; vsync pushes the file's contents under the key with the suffix stripped. Pass `--inline-file-suffix=_PATH --inline-file-suffix=_FILE` for the v0.6 shape:
 
 - `SSH_PRIVATE_KEY_PATH=keys/reqsume_dev` → pushes `<vault>/keys/reqsume_dev` as `SSH_PRIVATE_KEY`.
 - `GCP_SA_KEY_FILE=keys/sa.json` → pushes `<vault>/keys/sa.json` as `GCP_SA_KEY`.
 
 Relative paths anchor to `VAULT_ROOT` (the directory of the env file being parsed). Placeholders `${VAULT_ROOT}`, `${HOME}`, and leading `~/` are expanded in every value. Any missing or unreadable referenced file aborts the whole sync before any push (all-or-none).
 
-Two local-only keys (skipped — used by `gh` / `gcloud` on the local machine, not pushed):
+**Excluded keys — opt in with `--exclude-property=<key>` (repeatable).** Any key in this list is dropped from the run and never pushed. Typical candidates are tokens that exist locally for `gh` / `gcloud` to use directly:
 
 - `GITHUB_TOKEN`
 - `GOOGLE_APPLICATION_CREDENTIALS`
 
-Two routing keys (consumed by `vsync sync` itself, never pushed):
+If you pass no `--exclude-property` flag at all, **nothing is skipped** — every KV gets pushed. Same for `--inline-file-suffix`: with no flag, no file inlining happens.
 
-- `GITHUB_REPO`
-- `GCP_PROJECT_ID`
+Every `vsync sync` run prints the active parser policy header before the first push, so you can see exactly which rules were in effect. Full convention in [`docs/guide/sync.md`](docs/guide/sync.md) and design context in [`docs/specs/v0.7-explicit-sync-parser.md`](docs/specs/v0.7-explicit-sync-parser.md).
 
-Everything else is pushed verbatim. Full convention in [`docs/guide/sync.md`](docs/guide/sync.md) and design context in [`docs/specs/v0.6-vault-relative-file-refs.md`](docs/specs/v0.6-vault-relative-file-refs.md).
+### Typical `vsync sync` invocation
+
+The parser has no defaults. Pass the rules you want, every time. The shape
+that matches v0.6 behavior is:
+
+```bash
+vsync sync dev gh \
+  --inline-file-suffix=_PATH \
+  --inline-file-suffix=_FILE \
+  --exclude-property=GITHUB_TOKEN \
+  --exclude-property=GOOGLE_APPLICATION_CREDENTIALS
+```
+
+Drop this into your Taskfile / Makefile / CI so the call site shows the
+whole policy at a glance.
+
+**Migrating from v0.6?** Bare `vsync sync dev gh` no longer skips `GITHUB_TOKEN` / `GOOGLE_APPLICATION_CREDENTIALS` and no longer inlines `*_PATH` / `*_FILE`. Append the four flags above to every invocation to preserve the old behavior. The in-env routing keys `GITHUB_REPO` / `GCP_PROJECT_ID` are also no longer recognized — move them into config via `--gh-repo` / `--gcp-project` (persisted) and delete the lines from `.env.<env>`. See [`docs/specs/v0.7-explicit-sync-parser.md`](docs/specs/v0.7-explicit-sync-parser.md) §5 for full migration steps.
 
 ### Audit log
 
@@ -249,7 +266,7 @@ Auth is **outside vsync's scope** — the lib trusts whatever `gh` and `gcloud` 
 
 **`vsync sync <env> gh`:**
 1. Resolves `sync.gh.repo` from per-repo config (or `--gh-repo` flag, or first-run prompt).
-2. Parses `<vaultFolder>/.env.<env>` into push-ready KVs (file-ref + skip rules below).
+2. Parses `<vaultFolder>/.env.<env>` into push-ready KVs (using the `--inline-file-suffix` / `--exclude-property` flags you passed — see below).
 3. For each KV in a 6-worker pool: `gh secret set <KEY> --env <env> --repo <sync.gh.repo>` with the value on stdin.
 4. Requires `gh` CLI installed and `gh auth login` already done.
 
@@ -261,18 +278,23 @@ Auth is **outside vsync's scope** — the lib trusts whatever `gh` and `gcloud` 
 
 **`vsync sync <env> all`** runs both in sequence. Per-secret push failures don't abort siblings; final summary lists what failed. Parse-time failures (see "all-or-none" below) abort everything before any push.
 
-### File-reference convention (`.env.<env>`)
+Every run also prints the active parser policy header before the first push, so the operator can see which suffixes and exclusions were in effect for this invocation.
 
-Vsync reads each line of `.env.<env>` and pushes a KV to gh/gcp. Some keys carry **file paths** instead of literal values — vsync reads the file and pushes its bytes:
+### File-reference convention (`.env.<env>`) — explicit opt-in
+
+Vsync reads each line of `.env.<env>` and pushes a KV to gh/gcp. When you pass `--inline-file-suffix=<suffix>`, keys ending in that suffix are treated as file paths — vsync reads the file and pushes its bytes under the stripped name.
+
+With `--inline-file-suffix=_PATH --inline-file-suffix=_FILE` in effect:
 
 | In env file | Pushed as | Notes |
 |---|---|---|
 | `FOO_PATH=keys/foo` | `FOO` = file contents | suffix `_PATH` stripped; file resolved vault-relative |
 | `FOO_FILE=keys/foo` | `FOO` = file contents | suffix `_FILE` stripped; same resolution |
 | `SSH_PRIVATE_KEY_PATH=keys/dev` | `SSH_PRIVATE_KEY` = file contents | name the env-file key after the secret you want |
-| `GITHUB_TOKEN=…` | *skipped* | local-only |
-| `GOOGLE_APPLICATION_CREDENTIALS=…` | *skipped* | local-only |
-| `GITHUB_REPO=…`, `GCP_PROJECT_ID=…` | *routing meta* — never pushed | consumed by sync itself |
+
+With no `--inline-file-suffix` flag, no inlining happens — `FOO_PATH=keys/foo` is pushed as the literal string `keys/foo`.
+
+With `--exclude-property=GITHUB_TOKEN --exclude-property=GOOGLE_APPLICATION_CREDENTIALS` in effect, those keys are dropped from the run. With no `--exclude-property` flag, nothing is skipped.
 
 **Path resolution.** Relative paths anchor to `VAULT_ROOT` (the directory of the env file being parsed). Three forms of placeholder expansion are recognised in **every** value — file-ref or plain:
 
@@ -283,9 +305,9 @@ Vsync reads each line of `.env.<env>` and pushes a KV to gh/gcp. Some keys carry
 | `~/.ssh/id_rsa` or `${HOME}/.ssh/id_rsa` | `$HOME/.ssh/id_rsa` |
 | `/abs/path` | absolute, pass-through |
 
-**All-or-none on file refs.** If any `*_PATH` / `*_FILE` references a missing or unreadable file, vsync collects every such error and aborts before pushing anything. No partial syncs.
+**All-or-none on file refs.** If any configured file-ref references a missing or unreadable file, vsync collects every such error and aborts before pushing anything. No partial syncs.
 
-The canonical short-form reference lives in the header comment of [`src/envfile.ts`](src/envfile.ts); design context is in [`docs/specs/v0.6-vault-relative-file-refs.md`](docs/specs/v0.6-vault-relative-file-refs.md).
+The canonical short-form reference lives in the header comment of [`src/envfile.ts`](src/envfile.ts); design context is in [`docs/specs/v0.7-explicit-sync-parser.md`](docs/specs/v0.7-explicit-sync-parser.md).
 
 ---
 
@@ -338,7 +360,9 @@ In practice, just don't lose the keychain entry. `pull` itself is the recovery p
 
 | Release | What's in it |
 |---|---|
-| **0.5.0** | `vsync use <env>` — symlinks `./.env` (or `--link=<path>`) at the vault's env file so `dotenv.config()` just works; switch envs with one command. README rewrite + flow diagram. |
+| **0.7.0** | `vsync sync` parser has zero implicit policy. New repeatable flags `--inline-file-suffix=<suf>` and `--exclude-property=<key>` replace the old hardcoded `_PATH` / `_FILE` suffixes and the implicit `GITHUB_TOKEN` / `GOOGLE_APPLICATION_CREDENTIALS` skip-list — name every rule at the call site. In-env routing keys `GITHUB_REPO` / `GCP_PROJECT_ID` are no longer recognized (routing lives in config only). Every run prints the active policy header before pushing. Two intentional breaks vs. 0.6.x — see [`docs/specs/v0.7-explicit-sync-parser.md`](docs/specs/v0.7-explicit-sync-parser.md) §5. |
+| 0.6.0 | `.env.<env>` file-reference convention: any key ending in `_PATH` / `_FILE` is read from disk and the file's contents are pushed under the stripped name. Paths anchor to `VAULT_ROOT`; `${VAULT_ROOT}` / `${HOME}` / `~/` placeholders work in every value. All-or-none on missing files. (Superseded in 0.7 — suffixes are no longer hardcoded; pass `--inline-file-suffix` explicitly.) |
+| 0.5.0 | `vsync use <env>` — symlinks `./.env` (or `--link=<path>`) at the vault's env file so `dotenv.config()` just works; switch envs with one command. README rewrite + flow diagram. |
 | 0.4.0 | Append-only audit log at `s3://<bucket>/<repo>/<env>/audit.csv` + `vsync audit` viewer. Expandable `meta` JSON cell via `--note` / `--meta` + matching env vars. |
 | 0.3.0 | Opinionated layout: vault folder at `infra/vault/<env>/` with `--vault-folder` override; self-contained per-(repo, env) config; `vsync sync` for GitHub / GCP fanout. |
 
