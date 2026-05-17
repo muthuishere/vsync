@@ -44,7 +44,7 @@ function usage(code = 0): never {
   out("  versions <env>                  list versions on S3 for this (repo, env) (read-only)");
   out("");
   out("external fanout");
-  out("  sync <env> <gh|gcp|all>         push <vaultFolder>/.env.<env> KVs to GH/GCP secret stores");
+  out("  sync <env> <gh|gcp>             push <vaultFolder>/.env.<env> KVs to GH/GCP secret stores");
   out("");
   out("visibility");
   out("  audit <env> [--limit=N|--all|--csv]   show the append-only S3 audit log for this (repo, env)");

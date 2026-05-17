@@ -80,9 +80,9 @@ List `s3://<bucket>/<repo>/<env>/versions/`. One line per version with size + ag
 
 ## external fanout
 
-### `sync <env> <gh|gcp|all>`
+### `sync <env> <gh|gcp>`
 
-Read `<vaultFolder>/.env.<env>` → push each KV to the named target. Parallel (6 workers, 10-min timeout). First run prompts for routing config and saves it; subsequent runs zero-prompt. See [Fanout to GitHub / GCP](/guide/sync).
+Read `<vaultFolder>/.env.<env>` → push each KV to the named target. **One target per invocation** — if you need both `gh` and `gcp`, run twice. Parallel (6 workers, 10-min timeout). First run prompts for routing config and saves it; subsequent runs zero-prompt. See [Fanout to GitHub / GCP](/guide/sync).
 
 The parser has **zero implicit policy** as of v0.7 — every rule is named at the call site. Before pushing, sync prints the active parser policy header so the operator can see exactly which suffixes and exclusions were in effect for the run (empty lists print `(none — file refs disabled)` / `(none — nothing skipped)`). See [v0.7 spec §4](/specs/v0.7-explicit-sync-parser#_4-visibility-sync-prints-its-policy).
 

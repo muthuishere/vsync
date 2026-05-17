@@ -31,7 +31,7 @@ features:
     details: '`vsync export <env>` mints a `.share` file. Send it on one channel, the passphrase on another. Teammate imports + pulls — they''re live in 30 seconds.'
   - icon: ↗️
     title: Fanout to where prod runs
-    details: '`vsync sync <env> gh|gcp|all` pushes the same `.env.<env>` keys to GitHub Actions secrets / GCP Secret Manager. One edit; both stay in step.'
+    details: '`vsync sync <env> gh` / `vsync sync <env> gcp` pushes the same `.env.<env>` keys to GitHub Actions secrets / GCP Secret Manager. One edit; both stay in step.'
   - icon: 📜
     title: Append-only audit log
     details: Every push / pull / import / export records `who, where, when, version, free-form note` to a CSV on the bucket. `vsync audit <env>` prints it. CI tags rows with `--note="run #1234"`.
