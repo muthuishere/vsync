@@ -5,9 +5,6 @@ hero:
   name: Vsync
   text: Secrets your team actually shares.
   tagline: One encrypted vault for your environment secrets — shared across your team, mirrored to GH / GCP / AWS / Azure / Vault, audited every time someone touches it.
-  image:
-    src: /vsync-flow.png
-    alt: How vsync flows — owner vault → push → S3/MinIO with audit.csv → pull → teammate vault, with `vsync use` linking ./.env and `vsync sync` fanning out to GitHub / GCP / AWS / Azure / Vault
   actions:
     - theme: brand
       text: Get started
@@ -39,6 +36,12 @@ features:
     title: Just `dotenv.config()` — no path arg
     details: '`vsync use <env>` symlinks `./.env` at the vault''s env file. Apps just work. Switch envs with one command; restart the dev server.'
 ---
+
+<div class="vsync-flow-wrap">
+
+![How vsync flows — owner vault → push → S3/MinIO with audit.csv → pull → teammate vault, with `vsync use` linking ./.env and `vsync sync` fanning out to gh / gcp / aws / azure / vault.](/vsync-flow.png)
+
+</div>
 
 ## Install
 
