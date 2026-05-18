@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 760" font-family="ui-sans-serif, -apple-system, 'Segoe UI', sans-serif" font-size="16">
+  <style>
+    .stroke   { stroke: #1f2937; stroke-width: 2; fill: none; }
+    .stroke-thin { stroke: #1f2937; stroke-width: 1.5; fill: none; }
+    .box      { fill: #ffffff; stroke: #1f2937; stroke-width: 2; rx: 8; ry: 8; }
+    .pill     { fill: #f3f4f6; stroke: #1f2937; stroke-width: 1.5; rx: 18; ry: 18; }
+    .label    { fill: #111827; }
+    .mono     { fill: #111827; font-family: ui-monospace, 'SF Mono', Menlo, monospace; }
+    .muted    { fill: #4b5563; }
+    .title    { fill: #111827; font-size: 22px; font-weight: 600; }
+    .h        { fill: #111827; font-size: 17px; font-weight: 600; }
+  </style>
+
+  <!-- Title -->
+  <text x="700" y="48" text-anchor="middle" class="title">vsync — your .env files, kept simple, made as safe as a vault</text>
+
+  <!-- Owner vault box -->
+  <rect x="60"  y="120" width="320" height="220" class="box"/>
+  <text x="80"  y="148" class="h">owner: infra/vault/dev/</text>
+  <text x="80"  y="184" class="mono">  .env.dev</text>
+  <text x="80"  y="208" class="mono">  service-account.json</text>
+  <text x="80"  y="232" class="mono">  fixtures.json</text>
+  <text x="80"  y="256" class="mono">  tls/cert.pem</text>
+  <text x="80"  y="296" class="muted">whole folder is</text>
+  <text x="80"  y="316" class="muted">the unit of work</text>
+
+  <!-- S3 / MinIO bucket box (centre) -->
+  <rect x="520" y="120" width="360" height="220" class="box"/>
+  <text x="540" y="148" class="h">S3 / MinIO bucket</text>
+  <text x="540" y="172" class="mono">&lt;repo&gt;/&lt;env&gt;/</text>
+  <text x="540" y="208" class="mono">  versions/*.enc</text>
+  <text x="540" y="228" class="muted" font-size="14">    AES-256-GCM, manifest-sealed</text>
+  <text x="540" y="256" class="mono">  latest</text>
+  <text x="540" y="280" class="mono">  audit.csv</text>
+  <text x="540" y="320" class="muted" font-size="14">bucket alone is useless · key alone is useless</text>
+
+  <!-- Teammate vault box -->
+  <rect x="1020" y="120" width="320" height="220" class="box"/>
+  <text x="1040" y="148" class="h">teammate: infra/vault/dev/</text>
+  <text x="1040" y="184" class="mono">  .env.dev</text>
+  <text x="1040" y="208" class="mono">  service-account.json</text>
+  <text x="1040" y="232" class="mono">  fixtures.json</text>
+  <text x="1040" y="256" class="mono">  tls/cert.pem</text>
+  <text x="1040" y="296" class="muted">identical bytes</text>
+  <text x="1040" y="316" class="muted">after `vsync pull`</text>
+
+  <!-- Push arrow: owner → S3 -->
+  <path d="M 380 200 L 510 200" class="stroke" marker-end="url(#arrow)"/>
+  <text x="445" y="188" text-anchor="middle" class="mono">vsync push</text>
+
+  <!-- Pull arrow: S3 → teammate -->
+  <path d="M 880 200 L 1010 200" class="stroke" marker-end="url(#arrow)"/>
+  <text x="945" y="188" text-anchor="middle" class="mono">vsync pull</text>
+
+  <!-- Owner symlink box -->
+  <rect x="60"  y="400" width="320" height="56" class="box"/>
+  <text x="220" y="434" text-anchor="middle" class="mono">./.env  →  vault/.env.dev</text>
+
+  <!-- Teammate symlink box -->
+  <rect x="1020" y="400" width="320" height="56" class="box"/>
+  <text x="1180" y="434" text-anchor="middle" class="mono">./.env  →  vault/.env.dev</text>
+
+  <!-- vsync use dev arrows: vault box → symlink box -->
+  <path d="M 220 340 L 220 396" class="stroke-thin" marker-end="url(#arrow)"/>
+  <text x="234" y="374" class="mono">vsync use dev</text>
+
+  <path d="M 1180 340 L 1180 396" class="stroke-thin" marker-end="url(#arrow)"/>
+  <text x="1194" y="374" class="mono">vsync use dev</text>
+
+  <!-- vsync sync arrow: S3 → fanout row -->
+  <path d="M 700 340 L 700 510" class="stroke" marker-end="url(#arrow)"/>
+  <text x="715" y="430" class="mono">vsync sync &lt;target&gt;</text>
+
+  <!-- Fanout pills row (5 backends) -->
+  <g transform="translate(0,540)">
+    <!-- Each pill: width 220, height 56, gap 20 → total 5*220 + 4*20 = 1180. Centred at 700: start at 110. -->
+    <rect x="110"  y="0" width="220" height="56" class="pill"/>
+    <text x="220"  y="24" text-anchor="middle" class="h">gh</text>
+    <text x="220"  y="44" text-anchor="middle" class="muted" font-size="13">GitHub Actions</text>
+
+    <rect x="350"  y="0" width="220" height="56" class="pill"/>
+    <text x="460"  y="24" text-anchor="middle" class="h">gcp</text>
+    <text x="460"  y="44" text-anchor="middle" class="muted" font-size="13">GCP Secret Manager</text>
+
+    <rect x="590"  y="0" width="220" height="56" class="pill"/>
+    <text x="700"  y="24" text-anchor="middle" class="h">aws</text>
+    <text x="700"  y="44" text-anchor="middle" class="muted" font-size="13">AWS Secrets Manager</text>
+
+    <rect x="830"  y="0" width="220" height="56" class="pill"/>
+    <text x="940"  y="24" text-anchor="middle" class="h">azure</text>
+    <text x="940"  y="44" text-anchor="middle" class="muted" font-size="13">Azure Key Vault</text>
+
+    <rect x="1070" y="0" width="220" height="56" class="pill"/>
+    <text x="1180" y="24" text-anchor="middle" class="h">vault</text>
+    <text x="1180" y="44" text-anchor="middle" class="muted" font-size="13">HashiCorp Vault KV v2</text>
+  </g>
+
+  <text x="700" y="624" text-anchor="middle" class="muted" font-size="14">KVs from .env.&lt;env&gt; · one target per `vsync sync` invocation</text>
+
+  <!-- Audit footer -->
+  <text x="700" y="700" text-anchor="middle" class="muted">every push · pull · import · export  →  one row in audit.csv  (who · where · when · note)</text>
+
+  <!-- Arrow marker -->
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#1f2937"/>
+    </marker>
+  </defs>
+</svg>
