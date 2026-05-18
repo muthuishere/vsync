@@ -35,8 +35,8 @@ const sampleWithOverrides: ConfigFile = {
   ...sample,
   files: { vaultFolder: "apps/foo/infra/vault/dev" },
   sync: {
-    gh: { repo: "muthuishere/reqsume" },
-    gcp: { project: "reqsume-dev" },
+    gh: { repo: "acme/web" },
+    gcp: { project: "myapp-dev" },
   },
 };
 
@@ -57,8 +57,8 @@ afterAll(() => {
 
 describe("paths", () => {
   test("configFilePath sits at vsync/<repo>/env_<env>, env lowercased", () => {
-    expect(configFilePath("reqsume", "DEV")).toBe(
-      join(tmpRoot, "vsync", "reqsume", "env_dev"),
+    expect(configFilePath("myapp", "DEV")).toBe(
+      join(tmpRoot, "vsync", "myapp", "env_dev"),
     );
   });
 

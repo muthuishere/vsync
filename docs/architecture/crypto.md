@@ -72,7 +72,7 @@ Implementation: `src/sharefile.ts`. Test coverage: `test/sharefile.test.ts`.
 
 ## Why these specific magics
 
-- `RQE1` — historical from when the project was called `reqsume-env`. Kept for wire compatibility.
+- `RQE1` — historical magic from an earlier codename of this project. Kept for wire compatibility.
 - `RQEM0001` — `RQE` family + `M` for manifest + `0001` for version. Lets a future format bump (`RQEM0002`) coexist with old clients refusing it cleanly.
 - `SLS1` — Share-LayerSeal v1. Distinct prefix so a `.share` file mis-read as a `RQE1` bundle errors usefully.
 
