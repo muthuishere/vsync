@@ -9,7 +9,7 @@ Every (repo, env) is held by **two persistent halves**. Both required to push or
 │    ├── s3.{endpoint, region, bucket, …}    where to find bytes   │
 │    ├── encryption.salt                     PBKDF2 input          │
 │    ├── files.vaultFolder                   optional override     │
-│    ├── sync.{gh.repo, gcp.project}         set by `vsync sync`   │
+│    ├── sync.{gh, gcp, aws, azure, vault}   set by `vsync sync`   │
 │    └── audit.enabled                       default true          │
 └──────────────────────────────────────────────────────────────────┘
 
