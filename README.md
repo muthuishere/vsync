@@ -148,7 +148,7 @@ cd <cloned-repo>
 
 # 1. Import the share file your teammate sent (carries S3 creds + key).
 #    No prior `init` required on this machine.
-vsync import dev ./reqsume-dev.share
+vsync import dev ./myapp-dev.share
 # Passphrase: <paste>
 
 # 2. Pull the encrypted bundle.
@@ -206,7 +206,7 @@ As of v0.7 the parser has **zero implicit policy** — no hardcoded suffixes, no
 
 **File references — opt in with `--inline-file-suffix=<suf>` (repeatable).** Any key in `.env.<env>` whose name ends in a configured suffix is read from disk; vsync pushes the file's contents under the key with the suffix stripped. Pass `--inline-file-suffix=_PATH --inline-file-suffix=_FILE` for the v0.6 shape:
 
-- `SSH_PRIVATE_KEY_PATH=keys/reqsume_dev` → pushes `<vault>/keys/reqsume_dev` as `SSH_PRIVATE_KEY`.
+- `SSH_PRIVATE_KEY_PATH=keys/dev_ssh` → pushes `<vault>/keys/dev_ssh` as `SSH_PRIVATE_KEY`.
 - `GCP_SA_KEY_FILE=keys/sa.json` → pushes `<vault>/keys/sa.json` as `GCP_SA_KEY`.
 
 Relative paths anchor to `VAULT_ROOT` (the directory of the env file being parsed). Placeholders `${VAULT_ROOT}`, `${HOME}`, and leading `~/` are expanded in every value. Any missing or unreadable referenced file aborts the whole sync before any push (all-or-none).

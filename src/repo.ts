@@ -10,7 +10,7 @@
 //   2. SECRETS_SYNC_REPO env var
 //   3. `name` from package.json at the repo root, with any leading scope
 //      stripped (e.g. "@muthuishere/vsync" → "vsync")
-//   4. basename of the git remote / git toplevel (e.g. "reqsume")
+//   4. basename of the git remote / git toplevel (e.g. "myapp")
 //   5. basename of process.cwd() as a last resort
 //
 // All four file-paths and the keychain account are derived from the

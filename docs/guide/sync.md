@@ -156,7 +156,7 @@ With `--inline-file-suffix=_PATH --inline-file-suffix=_FILE` in effect:
 
 | `.env` entry | What gets pushed | Key on the target |
 |---|---|---|
-| `SSH_PRIVATE_KEY_PATH=keys/reqsume_dev` | contents of `<vault>/keys/reqsume_dev` | `SSH_PRIVATE_KEY` |
+| `SSH_PRIVATE_KEY_PATH=keys/dev_ssh` | contents of `<vault>/keys/dev_ssh` | `SSH_PRIVATE_KEY` |
 | `GCP_SA_KEY_FILE=keys/sa.json` | contents of `<vault>/keys/sa.json` | `GCP_SA_KEY` |
 | `TLS_CERT_PATH=~/certs/foo.pem` | contents of `$HOME/certs/foo.pem` | `TLS_CERT` |
 | `BOOTSTRAP_FILE=/etc/foo/bootstrap` | contents of `/etc/foo/bootstrap` | `BOOTSTRAP` |

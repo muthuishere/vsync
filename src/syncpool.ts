@@ -1,8 +1,7 @@
 // Bounded worker pool for fan-out secret pushes.
 //
-// Mirrors reqsume/secrets.go:runTasksConcurrently — N workers pull tasks off
-// a shared cursor, failures are collected (don't abort), an overall timeout
-// aborts everything via AbortSignal.
+// N workers pull tasks off a shared cursor; failures are collected (don't
+// abort siblings); an overall timeout aborts everything via AbortSignal.
 
 import type { SecretTask } from "./envfile";
 
