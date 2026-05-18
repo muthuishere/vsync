@@ -1,54 +1,58 @@
 /* ──────────────────────────────────────────────────────────────────────
-   Hero image sizing — VitePress's default is too tight; the vsync flow
-   diagram is landscape (1400×740) and gets crushed in the default slot.
-   Widen the image column on desktop so the diagram reads.
+   Hero — text-only, left-aligned, widened.
+
+   VitePress's split-with-image layout constrains `.text` and `.tagline`
+   to ~392px so they fit alongside the image. Without an image, those
+   constraints leave conspicuous empty right space. Keep the natural
+   left alignment but widen the text columns so the hero reads as a
+   full-bleed banner, not a half-empty card.
    ────────────────────────────────────────────────────────────────────── */
 
-@media (min-width: 960px) {
-  .VPHero.has-image .container {
-    /* split the hero ~45 / 55 — give the image a touch more room */
-    column-gap: 32px;
-  }
+.VPHero:not(.has-image) .name,
+.VPHero:not(.has-image) .text {
+  /* Title + subtitle: extend to near-full container width so the bold
+     heading uses the horizontal real estate that would have held the image. */
+  max-width: none !important;
+}
 
-  .VPHero .image {
-    max-width: none !important;
-    max-height: none !important;
-  }
+.VPHero:not(.has-image) .tagline {
+  /* Tagline stays at a comfortable reading line length (~75ch), but
+     widened from the default 392px which was sized for the image-split layout. */
+  max-width: 760px !important;
+}
 
-  .VPHero .image-container {
-    max-width: 640px !important;
-    max-height: 480px !important;
-    transform: none !important;
-  }
+/* ──────────────────────────────────────────────────────────────────────
+   vsync flow diagram — full-width below the hero, on a white card.
 
-  .VPHero .image-bg {
-    /* the default blurred-glow background looks off behind a busy diagram —
-       hide it so the diagram reads cleanly */
-    display: none !important;
-  }
+   The PNG has a transparent background; labels outside the boxes
+   (title, captions, audit footer) are dark text. On dark mode that's
+   dark-on-dark → invisible. The white card guarantees the diagram
+   reads on either light or dark page backgrounds.
+   ────────────────────────────────────────────────────────────────────── */
 
-  .VPHero .image-src {
-    max-width: 100% !important;
-    max-height: 100% !important;
-    width: auto !important;
-    height: auto !important;
-    position: relative !important;
-    top: auto !important;
-    left: auto !important;
-    transform: none !important;
+.vsync-flow-wrap {
+  max-width: 1200px;
+  margin: 2.5rem auto 3rem;
+  padding: 24px;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+}
+
+.vsync-flow-wrap img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+html.dark .vsync-flow-wrap {
+  box-shadow: 0 4px 28px rgba(0, 0, 0, 0.5);
+}
+
+@media (max-width: 640px) {
+  .vsync-flow-wrap {
+    margin: 1.5rem auto 2rem;
+    padding: 16px;
     border-radius: 8px;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
   }
-}
-
-@media (min-width: 1280px) {
-  .VPHero .image-container {
-    max-width: 780px !important;
-    max-height: 540px !important;
-  }
-}
-
-/* Light-mode tweak — drop the heavy shadow so the diagram blends on white */
-html:not(.dark) .VPHero .image-src {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
