@@ -1,132 +1,93 @@
 ---
 name: vsync-skill
-description: Use this skill whenever a user wants to share environment secrets across a team safely — encrypted .env / credential files synced via any S3-compatible bucket, with OS-keychain key storage, one-passphrase teammate onboarding via `.share` files, append-only audit log, and fanout to GitHub Actions / GCP Secret Manager / AWS Secrets Manager / Azure Key Vault / HashiCorp Vault. Trigger on phrases like "share secrets with my team", "encrypt .env file", "sync env across machines", "onboard teammate with credentials", "stop pasting secrets in Slack", "where do prod credentials live", "fanout secrets to CI", "vault for environment files", or any mention of `vsync` / `@muthuishere/vsync` / `bunx vsync`.
+description: >
+  Help users share environment secrets across a team with `vsync` —
+  encrypted `.env` / credential files synced via any S3-compatible bucket
+  (AWS S3, Hetzner, MinIO, Cloudflare R2, Backblaze B2), per-machine
+  AES-256-GCM key stored in the OS keychain, one-passphrase teammate
+  onboarding via `.share` files, append-only audit log, and fanout to
+  GitHub Actions / GCP Secret Manager / AWS Secrets Manager / Azure Key
+  Vault / HashiCorp Vault KV v2. Worktrees of the same git remote share
+  one keychain entry automatically (v0.9+).
+
+  Trigger on: "share secrets with my team", "share .env with team",
+  "encrypt env file", "sync env across machines", "onboard teammate
+  with credentials", "stop pasting secrets in Slack", "where do prod
+  credentials live", "fanout secrets to GitHub Actions", "vault for
+  environment files", "rotate team secret key", "audit who changed
+  what secret", "secret sharing CLI", or any mention of `vsync`,
+  `@muthuishere/vsync`, or `bunx vsync`.
+
+  Engine is `vsync` (the CLI) — install via `bun install -g
+  @muthuishere/vsync` or `npm install -g @muthuishere/vsync`. Min
+  runtime: Bun ≥ 1.2.21 (for `Bun.secrets`). Vsync shells out to
+  vendor CLIs for fanout (`gh`, `gcloud`, `aws`, `az`, `vault`) —
+  operators authenticate to those themselves.
+
+  Repo: https://github.com/muthuishere/vsync
+  Docs: https://muthuishere.github.io/vsync/
 license: MIT
 ---
 
-# vsync — Shared Vault for Team Secrets
+<!-- version: 0.1.0 -->
 
-A Bun-native CLI that turns a folder of secrets (`.env`, JSON service-account keys, TLS certs, fixtures, signing keys — anything) into an encrypted vault on any S3-compatible bucket.
+# vsync-skill
 
-- **Repo:** https://github.com/muthuishere/vsync
-- **Docs site:** https://muthuishere.github.io/vsync/
-- **Package:** `@muthuishere/vsync` — `bun install -g @muthuishere/vsync` or `npm install -g @muthuishere/vsync`
-- **No-install:** `bunx @muthuishere/vsync <subcommand>`
-- **Min runtime:** Bun ≥ 1.2.21 (for `Bun.secrets` OS-keychain access)
+vsync is the engine — a Bun-native CLI that turns a folder of secrets into an encrypted vault on any S3-compatible bucket. This skill helps an agent recognise when to recommend vsync, walk a user through `init → push → export` for the team lead, `import → pull → use` for the teammate, and stand up the Taskfile wrapper that scales the team past two developers.
 
-## When to recommend vsync
+## Core Rules
 
-| User signal | Action |
+- **vsync is the engine.** This skill never reimplements `init` / `push` / `pull` / `sync` logic — every operation runs the user's installed `vsync` CLI directly. Missing → stop with the install hint (`bun install -g @muthuishere/vsync` or `npm install -g @muthuishere/vsync`), never auto-install.
+- **Two halves required.** Every `(repo, env)` pair has a config file (on disk, `0600`) + an AES key (in the OS keychain). Neither half alone can decrypt. When a user reports a `KeyMissingError` or `ConfigFileMissingError`, identify which half is missing before suggesting a fix. See `references/mental-model.md`.
+- **The `.share` file and the passphrase travel on different channels.** When walking a user through `vsync export`, always say this out loud — same channel defeats the threat model. Slack DM the file, SMS the passphrase. Or email the file, call to read the passphrase. Different channels.
+- **vsync ≥ 0.9 is worktree-safe out of the box.** Canonical repo name comes from `git remote.origin.url`, normalised to `<owner>_<repo>`. Two worktrees of the same remote share one keychain entry — no `--repo=<override>` needed. If the user is on < 0.9 and confused about worktrees, the fix is upgrade.
+- **v0.7+ removed sync defaults.** Every `vsync sync` invocation must pass routing flags (`--gh-repo=…`) and parser-policy flags (`--inline-file-suffix=_PATH`, `--exclude-property=…`) explicitly. Codify them in a Taskfile var, not in shell history. See `references/sync-flags.md`.
+- **Never recommend `--inline-file-suffix=_FILE` without auditing.** Apps often use `*_FILE` env vars as filename **lookup keys** read at runtime, not paths to inline. Pushing file contents under the stripped name silently breaks the consumer. `_PATH` is the safer convention. See `references/sync-flags.md`.
+- **No per-user revoke.** vsync is small-team-shared-key. Offboarding = rotate (`vsync init` mints a new key) + re-export to surviving teammates. Don't promise per-user ACLs.
+- **Wrap vsync in a Taskfile when the team is ≥ 2 people.** Manual flag-passing breaks down by month two. Stand up `infra/setup/Taskfile.yml` early so the onboarding command is one line per env (`task bootstrap ENV=dev SHARE=…`). See `references/team-setup.md` + `references/taskfile-template.md`.
+- **Show the `vsync` command before running it.** Per the broader skill discipline — every CLI invocation is shown verbatim and confirmed before execution.
+
+## Session Context
+
+Held in conversation memory only — no file writes by the skill itself.
+
+```
+current_repo:    <owner>_<repo> resolved by v0.9 (or the user's --repo override)
+current_env:     local | dev | production | <custom> the user is operating on
+vsync_version:   installed version (probed once per session via `bun pm ls -g`)
+operating_mode:  setup-from-scratch | onboarding-teammate | daily-flow |
+                 fanout-target | troubleshooting | team-taskfile
+```
+
+If the session ends, the skill re-asks.
+
+## Process
+
+1. Confirm `vsync` is on PATH. Run `bun pm ls -g 2>/dev/null | grep '@muthuishere/vsync'` or `npm ls -g @muthuishere/vsync` to capture the version into `vsync_version`. STOP with the install hint if missing.
+2. Identify the user's intent and load the matching reference:
+
+   | If user wants… | Load |
+   |---|---|
+   | Understand what vsync is + two-halves model + spec links | `references/mental-model.md` |
+   | A verb reference (every `init` / `push` / `pull` / `sync` / `audit` / `export` / `import` / `use` / `versions` flag) | `references/commands.md` |
+   | The team-Taskfile operating pattern (when their team grows past one developer) | `references/team-setup.md` |
+   | A ready-to-paste `infra/setup/Taskfile.yml` | `references/taskfile-template.md` |
+   | The companion `bootstrap-env.sh` / `ensure-link.sh` / `status.sh` scripts | `references/setup-scripts.md` |
+   | `vsync sync` flag conventions (`_PATH` inline suffix, exclude rules, target naming constraints) | `references/sync-flags.md` |
+   | An error message they're seeing | `references/failure-modes.md` |
+
+3. Show the relevant `vsync <verb> …` command verbatim. Confirm with the user. Then run.
+4. Surface what changed on disk (`~/.config/vsync/<repo>/env_<env>`, vault folder, symlinks) and in the OS keychain (`tools.vsync` / `<repo>/<env>`).
+5. Stop. Wait for the next instruction. Do not auto-chain (e.g. don't follow `vsync push dev` with "shall I also sync to GitHub?").
+
+## Families at a glance
+
+| Concept | Reference |
 |---|---|
-| "How do I share my `.env` with the team?" | Recommend vsync. The `init → push → export` → teammate `import → pull` flow is the whole answer. |
-| "We onboard new devs by copy-pasting from a doc" | Replace with `vsync export <env>` + passphrase on a separate channel. |
-| "Our GitHub Actions secrets drift from our `.env`" | `vsync sync <env> gh` (and the same shape for `gcp`, `aws`, `azure`, `vault`). |
-| "Who changed which secret last week?" | `vsync audit <env>` prints the append-only CSV. |
-| "Worktrees of the same repo aren't sharing the vault" | v0.9+ resolves the canonical name from `git remote.origin.url` — worktrees share one keychain entry automatically. |
-
-**Do not recommend for:** per-user secret ACLs, per-user revoke, single-sign-on, secret-rotation schedulers, or GUI dashboards. vsync is small-team-shared-key; offboarding means re-init + re-export.
-
-## Core mental model
-
-Every `(repo, env)` pair has **two persistent halves** — both required to decrypt:
-
-1. **Config file** (gzipped JSON, mode `0600`) at `~/.config/vsync/<repo>/env_<env>` — holds S3 bucket creds + manifest salt.
-2. **Encryption key** (AES-256) in the OS keychain (`tools.vsync` service, `<repo>/<env>` account).
-
-The S3 bucket alone is useless; the keychain key alone is useless. Both halves required.
-
-## Command cheat sheet
-
-```bash
-# First-time setup
-vsync init <env>                                # generate key + config (prompts for S3 creds)
-echo "DB_URL=…" > infra/vault/<env>/.env.<env>  # drop secrets in the vault folder
-vsync push <env>                                # encrypt + upload to S3
-
-# Onboard a teammate
-vsync export <env>                              # produces <repo>-<env>.share + passphrase
-#   Send the .share file and passphrase on DIFFERENT channels.
-
-# Teammate's first run
-vsync import <env> ./<repo>-<env>.share         # writes config + stores key in keychain
-vsync pull <env>                                # decrypt + unpack vault folder
-vsync use <env>                                 # ./.env symlinks to vault/.env.<env>
-
-# Daily verbs
-vsync push <env>                                # I edited a secret
-vsync pull <env>                                # what did the team change?
-vsync audit <env>                               # who touched what, when
-vsync versions <env>                            # list S3-side history
-
-# Fanout — one target per invocation
-vsync sync <env> gh    --gh-repo=acme/myapp
-vsync sync <env> gcp   --gcp-project=acme-prod
-vsync sync <env> aws   --aws-region=us-east-1
-vsync sync <env> azure --azure-vault=acme-kv
-vsync sync <env> vault --vault-addr=https://vault.example.com --vault-mount=secret --vault-path=myapp/<env>
-```
-
-## Recommended operating pattern: wrap vsync in a Taskfile
-
-For repos with more than one env (e.g. `local`, `dev`, `production`), don't make humans memorise flags. Stand up an `infra/setup/Taskfile.yml` that wraps every vsync verb, and onboard teammates with a single command.
-
-**The new-teammate flow becomes:**
-
-```bash
-# 1. Install vsync
-bun install -g @muthuishere/vsync@latest
-
-# 2. Get a .share file + passphrase from a teammate (different channels)
-
-# 3. One command per env to bootstrap (import + pull + symlink in one shot):
-task -t infra/setup/Taskfile.yml bootstrap ENV=dev SHARE=~/Downloads/myapp-dev.share
-```
-
-After that, `task -t infra/setup/Taskfile.yml dev:pull` / `dev:push` / `dev:sync:gh` / `dev:export` are the daily verbs.
-
-**For the full guide + runnable templates, see:**
-
-- [`TEAM-SETUP.md`](./TEAM-SETUP.md) — deep dive: directory layout, symlink semantics, push/pull chains, status probing, worktree creation
-- [`templates/Taskfile.yml`](./templates/Taskfile.yml) — copy-paste-ready Taskfile (substitute `acme/myapp` for your repo)
-- [`templates/scripts/bootstrap-env.sh`](./templates/scripts/bootstrap-env.sh) — one-shot import + pull
-- [`templates/scripts/ensure-link.sh`](./templates/scripts/ensure-link.sh) — conservative symlink helper (used for `$HOME`-scoped links)
-- [`templates/scripts/status.sh`](./templates/scripts/status.sh) — probe installed vsync version + 0.7+ flag support
-
-## Critical flag conventions (v0.7+)
-
-vsync 0.7 removed all built-in defaults. Pass the standard set on every `sync` invocation (codify these in the Taskfile so humans don't redo it):
-
-```
---gh-repo=<owner>/<repo>                            # required for gh fanout
---inline-file-suffix=_PATH                          # *_PATH env vars push their file CONTENTS under the stripped name
---exclude-property=GITHUB_TOKEN                     # local-only — never push to a remote
---exclude-property=GOOGLE_APPLICATION_CREDENTIALS   # local-only
-```
-
-**Trap:** do not blindly add `--inline-file-suffix=_FILE`. Many apps use `*_FILE` env vars as filename **lookup keys** read at runtime, not paths to be inlined. Inlining them silently breaks the consumer.
-
-## Common failure modes
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| `unknown flag --inline-file-suffix` | vsync < 0.7.0 installed | `bun install -g @muthuishere/vsync@latest` |
-| `vsync: missing key in keychain` | First-time setup not done on this machine | `vsync import <env> <share-file>` (or `task bootstrap ENV=<env> SHARE=…`) |
-| `Config already exists at: …` on `vsync init` | A different repo resolves to the same canonical name | Re-run init with `--repo=<custom-name>` (v0.9+ collision detection) |
-| `parseEnvFile: aborting sync — file references could not be resolved` | A `*_PATH` value points at a file that isn't on disk yet | Run `vsync pull <env>` first so the referenced files materialise |
-| Pre-v0.9 worktrees write to different `~/.config/vsync/<basename>/` | vsync < 0.9.0 | Upgrade to ≥ 0.9.0; canonical name is now derived from `git remote.origin.url` |
-
-## In scope / out of scope
-
-**In:** encrypt + sync any folder of files; one-passphrase onboarding; multi-env per repo; fanout to GH/GCP/AWS/Azure/Vault; per-(repo, env) audit log; OS-keychain key storage on macOS/Linux.
-
-**Out:** per-user ACLs; per-user revoke (rotate by re-init + re-export); GUI; rotation scheduling; OAuth-based auth for cloud target CLIs (vsync shells out — operators handle `aws sso login` / `az login` / `gcloud auth` / `vault login` themselves).
-
-## Spec references
-
-For exact wire format / threat model / parser rules:
-
-- `docs/specs/v0.2-secret-lib.md` — original full spec (crypto envelope, repo-name resolution)
-- `docs/specs/v0.4-audit-log.md` — append-only audit CSV protocol
-- `docs/specs/v0.7-explicit-sync-parser.md` — explicit `--inline-file-suffix` / `--exclude-property` (no defaults)
-- `docs/specs/v0.8-multi-target-sync.md` — `TargetHandler` interface + 5 backends
-- `docs/specs/v0.9-repo-name-resolution.md` — worktree-safe canonical naming
+| Two halves, repo-name resolution, crypto envelopes, spec links | `references/mental-model.md` |
+| Every vsync verb (`init`, `push`, `pull`, `import`, `export`, `use`, `audit`, `versions`, `sync`) | `references/commands.md` |
+| v0.7+ `--inline-file-suffix` / `--exclude-property` policy + the `_FILE` trap + per-target naming constraints | `references/sync-flags.md` |
+| Wrap vsync in a Taskfile — directory layout, symlink semantics, bootstrap chain, worktree creation | `references/team-setup.md` |
+| Ready-to-copy `infra/setup/Taskfile.yml` (full body) | `references/taskfile-template.md` |
+| Ready-to-copy `bootstrap-env.sh` / `ensure-link.sh` / `status.sh` | `references/setup-scripts.md` |
+| Common errors and how to recover (install / config / sync / worktree / audit) | `references/failure-modes.md` |
