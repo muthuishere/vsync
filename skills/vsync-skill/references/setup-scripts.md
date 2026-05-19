@@ -13,7 +13,16 @@ chmod +x infra/setup/scripts/*.sh
 
 ## `bootstrap-env.sh` — one-shot import + pull
 
-The user-facing onboarding command. A new teammate runs `task bootstrap ENV=dev SHARE=…` and this script chains `vsync import` (prompts for passphrase) + `<env>:pull` task (decrypts vault + creates all symlinks). Idempotent — re-running re-imports (handy after key rotation).
+The user-facing onboarding command. A new teammate runs `task bootstrap ENV=dev SHARE=…` and this script chains `vsync import` (prompts for passphrase, or reads `$PASSPHRASE` non-interactively) + `<env>:pull` task (decrypts vault + creates all symlinks). Idempotent — re-running re-imports (handy after key rotation).
+
+**Two modes:**
+
+| Mode | When | How |
+|---|---|---|
+| Interactive (default) | Real teammate onboarding — passphrase came on a separate channel (SMS / phone), user types it into the prompt | Just run `task bootstrap ENV=… SHARE=…` |
+| Non-interactive | VPS provisioning / cloud-init / scripted setup where stdin isn't a TTY | `PASSPHRASE="$(cat /path/to/PASSPHRASE.txt)" task bootstrap ENV=… SHARE=…` |
+
+**First-time-on-S3 detection:** if pull fails with `S3Error code: "NoSuchKey"`, the script surfaces a friendlier message explaining the team lead needs to `vsync push` once before teammates can bootstrap. Bootstrap is for joining a vault that already exists on S3.
 
 ```bash
 #!/usr/bin/env bash
@@ -30,8 +39,12 @@ The user-facing onboarding command. A new teammate runs `task bootstrap ENV=dev 
 #   infra/setup/scripts/bootstrap-env.sh <local|dev|production> <share-file>
 #
 # EXAMPLES
+#   # Interactive (teammate onboarding)
 #   infra/setup/scripts/bootstrap-env.sh dev   ~/Downloads/myapp-dev.share
-#   infra/setup/scripts/bootstrap-env.sh local ~/Downloads/myapp-local.share
+#
+#   # Non-interactive (VPS / cloud-init — passphrase from a file)
+#   PASSPHRASE="$(cat /run/secrets/vsync-passphrase)" \
+#     infra/setup/scripts/bootstrap-env.sh production /run/secrets/myapp-production.share
 
 set -euo pipefail
 
@@ -65,9 +78,15 @@ case $env in
 esac
 
 echo "→ vsync import $env $share"
-echo "  (you'll be prompted for the passphrase from the separate channel)"
-echo
-vsync import "$env" "$share"
+if [[ -n ${PASSPHRASE:-} ]]; then
+  echo "  (using \$PASSPHRASE from env — non-interactive)"
+  echo
+  vsync import "$env" "$share" --passphrase="$PASSPHRASE"
+else
+  echo "  (you'll be prompted for the passphrase from the separate channel)"
+  echo
+  vsync import "$env" "$share"
+fi
 
 echo
 echo "→ task -t infra/setup/Taskfile.yml $pull_task"
@@ -75,12 +94,40 @@ echo "  (pulls + decrypts the vault, sets up env-file + SSH symlinks)"
 echo
 
 cd "$repo_root"
-task -t infra/setup/Taskfile.yml "$pull_task"
+
+# Pull through a buffer so we can inspect for the "S3 bucket has no vault yet"
+# case — that one error has a much more helpful recovery hint than the raw
+# S3Error: NoSuchKey trace.
+pull_out=$(mktemp -t vsync-bootstrap-pull.XXXXXX)
+trap 'rm -f "$pull_out"' EXIT
+
+if task -t infra/setup/Taskfile.yml "$pull_task" 2>&1 | tee "$pull_out"; then
+  pull_ok=true
+else
+  pull_ok=false
+fi
+
+if ! $pull_ok; then
+  if grep -q 'NoSuchKey' "$pull_out"; then
+    cat >&2 <<EOF
+
+✗ No vault on S3 yet for $env.
+  This bootstrap flow is for joining a team that ALREADY has a vault.
+
+  If you are setting up the first machine for this env, the order is:
+    1. vsync init $env       (already done if you have a .share file)
+    2. vsync push $env       (seals the empty/initial vault onto S3)
+    3. Teammates can now bootstrap from your .share + passphrase
+
+EOF
+  fi
+  exit 1
+fi
 
 echo
 echo "✓ $env bootstrapped."
 echo "  The .share file is no longer needed; consider removing it:"
-echo "    rm $share"
+echo "    shred -u $share 2>/dev/null || rm -P $share"
 ```
 
 ## `ensure-link.sh` — conservative `$HOME`-scoped symlink helper
