@@ -1,8 +1,12 @@
+---
+name: vsync-skill
+---
+
 # Team Setup — wrap vsync in a Taskfile
 
 This is the operating pattern a real team converges on after a few weeks of using vsync. Pick this up when one developer's manual `vsync init / push / export` flow needs to scale to a team that won't remember the flags.
 
-The pattern in one paragraph: standardise the vault folder layout (`infra/vault/<env>/`), wrap every vsync verb in `infra/setup/Taskfile.yml`, codify the v0.7+ flag set as a Taskfile var, and ship a `bootstrap` task that chains `vsync import` + `<env>:pull` so first-day-on-the-job is one command per env. Runnable templates are next to this file in `templates/`.
+The pattern in one paragraph: standardise the vault folder layout (`infra/vault/<env>/`), wrap every vsync verb in `infra/setup/Taskfile.yml`, codify the v0.7+ flag set as a Taskfile var, and ship a `bootstrap` task that chains `vsync import` + `<env>:pull` so first-day-on-the-job is one command per env. Runnable templates are next to this file in `../templates/`.
 
 ## Directory layout
 
@@ -161,10 +165,10 @@ Keep `infra/setup/Taskfile.yml` scoped to secrets-plumbing. Don't let it grow in
 
 ## See also
 
-- [`SKILL.md`](./SKILL.md) — agent-skill frontmatter + when-to-recommend + command cheat sheet
-- [`templates/Taskfile.yml`](./templates/Taskfile.yml) — runnable starter (substitute `acme/myapp`)
-- [`templates/scripts/bootstrap-env.sh`](./templates/scripts/bootstrap-env.sh)
-- [`templates/scripts/ensure-link.sh`](./templates/scripts/ensure-link.sh)
-- [`templates/scripts/status.sh`](./templates/scripts/status.sh)
+- [`../SKILL.md`](../SKILL.md) — agent-skill router + core rules + process
+- [`taskfile-template.md`](./taskfile-template.md) — full Taskfile body with customisation checklist (copy block into `infra/setup/Taskfile.yml`)
+- [`setup-scripts.md`](./setup-scripts.md) — `bootstrap-env.sh`, `ensure-link.sh`, `status.sh` (copy into `infra/setup/scripts/`)
+- [`commands.md`](./commands.md) — every vsync verb the Taskfile wraps
+- [`sync-flags.md`](./sync-flags.md) — `--inline-file-suffix` / `--exclude-property` policy
 - vsync docs: https://muthuishere.github.io/vsync/
 - vsync repo: https://github.com/muthuishere/vsync

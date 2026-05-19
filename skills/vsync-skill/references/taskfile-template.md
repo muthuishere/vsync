@@ -1,3 +1,29 @@
+---
+name: vsync-skill
+---
+
+# Taskfile template — `infra/setup/Taskfile.yml`
+
+The full Taskfile that wraps every vsync verb for a multi-env team setup. Copy the YAML block below verbatim into `infra/setup/Taskfile.yml` in the user's repo, then walk them through the customisation checklist.
+
+## Customisation checklist
+
+Before saving the file, change these four things:
+
+1. **`GH_REPO`** (line ~24) — set to `<owner>/<repo>` for the GitHub fanout target.
+2. **Env list** — drop `local`, `dev`, or `production` blocks if the repo uses fewer environments; or duplicate the `dev:*` block under a new env name (e.g. `staging`) to add one.
+3. **SSH key naming convention** — the `ensure:ssh:link` task auto-discovers every file in `infra/vault/<env>/keys/` (excluding `*.pub`) and creates `~/.ssh/<basename>` symlinks. If the user wants a different naming scheme, adjust the loop body.
+4. **`--exclude-property=` entries** — add any other local-only env vars the user has (e.g. personal API tokens used during local dev).
+
+## Why no `dotenv:` declaration in this Taskfile
+
+The root `Taskfile.yml` typically declares `dotenv: [".env"]`. On a fresh clone, that `.env` doesn't exist yet — it's created by the first `local:pull`. Any setup task therefore has to run **before** the dotenv chain, or the very first run crashes loading a non-existent file.
+
+`infra/setup/Taskfile.yml` stays free of `dotenv:` declarations. Don't add one.
+
+## File contents
+
+```yaml
 version: '3'
 
 # infra/setup/Taskfile.yml — vsync wrapper for team-shared secret vaults.
@@ -10,12 +36,6 @@ version: '3'
 #   task -t infra/setup/Taskfile.yml bootstrap ENV=dev SHARE=~/Downloads/myapp-dev.share
 #   task -t infra/setup/Taskfile.yml dev:pull
 #   task -t infra/setup/Taskfile.yml worktree:create WT=/abs/path BRANCH=feat/x
-#
-# Customisation checklist when copying this into your repo:
-#   1. Set GH_REPO below to <owner>/<repo>
-#   2. Adjust env list (local / dev / production) — drop or add as needed
-#   3. Adjust SSH-key naming convention if you don't want `<repo>_<env>`
-#   4. Add `--exclude-property=` entries for any other local-only vars
 
 vars:
   # ──────────────────────────────────────────────────────────────────
@@ -253,3 +273,8 @@ tasks:
         fi
         echo ""
         echo "✓ Worktree ready at {{.WT}} on branch {{.BRANCH}}"
+```
+
+## Companion scripts
+
+This Taskfile references three executables at `infra/setup/scripts/`. Copy their contents from `references/setup-scripts.md` and `chmod +x` them.
