@@ -92,6 +92,32 @@ export async function main(argv: string[]): Promise<void> {
   const repo = await getRepoName({ override: flags.repo });
   const root = await getRepoRoot();
 
+  // Collision check (spec v0.9 §5): if a config already exists at the
+  // resolved (repo, env) path, abort rather than silently overwrite.
+  // Two different repos can resolve to the same canonical name; the user
+  // recovers by re-running with --repo=<custom-name>.
+  const targetConfigPath = configFilePath(repo, env);
+  if (existsSync(targetConfigPath)) {
+    console.error(`✗ Config already exists at:`);
+    console.error(`    ${targetConfigPath}`);
+    console.error("");
+    console.error(
+      "If this is a different repo that happens to resolve to the same name,",
+    );
+    console.error("re-run with --repo=<custom-name>:");
+    console.error("");
+    console.error(`    vsync init ${env} --repo=my-custom-name`);
+    console.error("");
+    console.error(
+      "If this is the repo you initialised before, you don't need to init",
+    );
+    console.error(
+      `again — your existing keychain entry is intact. Run \`vsync pull ${env}\``,
+    );
+    console.error("to fetch the latest vault.");
+    process.exit(1);
+  }
+
   const existingDefaults = await loadDefaults();
   const defaultS3 = existingDefaults?.s3 ?? {};
 
