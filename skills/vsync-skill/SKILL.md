@@ -40,6 +40,7 @@ vsync is the engine — a Bun-native CLI that turns a folder of secrets into an 
 - **vsync is the engine.** This skill never reimplements `init` / `push` / `pull` / `sync` logic — every operation runs the user's installed `vsync` CLI directly. Missing → stop with the install hint (`bun install -g @muthuishere/vsync` or `npm install -g @muthuishere/vsync`), never auto-install.
 - **Two halves required.** Every `(repo, env)` pair has a config file (on disk, `0600`) + an AES key (in the OS keychain). Neither half alone can decrypt. When a user reports a `KeyMissingError` or `ConfigFileMissingError`, identify which half is missing before suggesting a fix. See `references/mental-model.md`.
 - **The `.share` file and the passphrase travel on different channels.** When walking a user through `vsync export`, always say this out loud — same channel defeats the threat model. Slack DM the file, SMS the passphrase. Or email the file, call to read the passphrase. Different channels.
+- **When persisting `.share` + passphrase to disk, ask for the two destinations separately.** Never default both to the same folder. Ask "where should the `.share` land?" *and then* "and where should the passphrase go?" — the two prompts themselves signal these should differ. If the user picks the same parent folder for both, surface the colocation warning from `references/recipes.md#EXPORT-1` before proceeding.
 - **vsync ≥ 0.9 is worktree-safe out of the box.** Canonical repo name comes from `git remote.origin.url`, normalised to `<owner>_<repo>`. Two worktrees of the same remote share one keychain entry — no `--repo=<override>` needed. If the user is on < 0.9 and confused about worktrees, the fix is upgrade.
 - **v0.7+ removed sync defaults.** Every `vsync sync` invocation must pass routing flags (`--gh-repo=…`) and parser-policy flags (`--inline-file-suffix=_PATH`, `--exclude-property=…`) explicitly. Codify them in a Taskfile var, not in shell history. See `references/sync-flags.md`.
 - **Never recommend `--inline-file-suffix=_FILE` without auditing.** Apps often use `*_FILE` env vars as filename **lookup keys** read at runtime, not paths to inline. Pushing file contents under the stripped name silently breaks the consumer. `_PATH` is the safer convention. See `references/sync-flags.md`.
@@ -74,6 +75,7 @@ If the session ends, the skill re-asks.
    | A ready-to-paste `infra/setup/Taskfile.yml` | `references/taskfile-template.md` |
    | The companion `bootstrap-env.sh` / `ensure-link.sh` / `status.sh` scripts | `references/setup-scripts.md` |
    | `vsync sync` flag conventions (`_PATH` inline suffix, exclude rules, target naming constraints) | `references/sync-flags.md` |
+   | A multi-step preset (export to specific paths, VPS provisioning, etc.) | `references/recipes.md` |
    | An error message they're seeing | `references/failure-modes.md` |
 
 3. Show the relevant `vsync <verb> …` command verbatim. Confirm with the user. Then run.
@@ -90,4 +92,5 @@ If the session ends, the skill re-asks.
 | Wrap vsync in a Taskfile — directory layout, symlink semantics, bootstrap chain, worktree creation | `references/team-setup.md` |
 | Ready-to-copy `infra/setup/Taskfile.yml` (full body) | `references/taskfile-template.md` |
 | Ready-to-copy `bootstrap-env.sh` / `ensure-link.sh` / `status.sh` | `references/setup-scripts.md` |
+| Multi-step presets — export with explicit destinations, VPS provisioning, etc. | `references/recipes.md` |
 | Common errors and how to recover (install / config / sync / worktree / audit) | `references/failure-modes.md` |
