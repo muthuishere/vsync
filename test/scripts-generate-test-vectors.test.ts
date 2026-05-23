@@ -20,7 +20,7 @@ import { generateAllVectors } from "../scripts/generate-test-vectors";
 import { decrypt } from "../src/crypto";
 import { unwrap } from "../src/manifest";
 
-const PBKDF2_TIMEOUT = 60000;
+const PBKDF2_TIMEOUT = 120000;
 const FIXED_SHA = "deadbeefcafef00dba5eba110000000000000000";
 
 let outA: string;

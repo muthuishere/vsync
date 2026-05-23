@@ -92,7 +92,17 @@ type BlobJson = {
   secretAccessKey: string;
   prefix: string;
   env: string;
+  /**
+   * Standard base64 of the UTF-8 bytes the CLI's PBKDF2 sees as salt input —
+   * i.e. `Buffer.from(cfg.encryption.salt, "utf8").toString("base64")`.
+   * Readers MUST base64-decode and feed the raw bytes to PBKDF2 (see v0.10 §4).
+   */
+  salt: string;
+  /** PBKDF2 iteration count. Reference value is 600000 (v0.2 spec). */
+  iterations: number;
 };
+
+const DEFAULT_PBKDF2_ITERATIONS = 600_000;
 
 export async function main(argv: string[]): Promise<void> {
   const { flags } = parseArgs(argv);
@@ -192,6 +202,12 @@ export async function main(argv: string[]): Promise<void> {
   }
 
   // ─── Build + emit blob ──────────────────────────────────────────────
+  // Salt: the on-disk `cfg.encryption.salt` is the ASCII string the CLI's
+  // PBKDF2 sees as salt input (`enc.encode(salt)` in src/crypto.ts). Wire
+  // format is standard base64 of those UTF-8 bytes; readers base64-decode
+  // and feed the raw bytes to PBKDF2 (v0.10 §4).
+  const saltB64 = Buffer.from(cfg.encryption.salt, "utf8").toString("base64");
+
   const blob: BlobJson = {
     v: 1,
     endpoint,
@@ -201,6 +217,8 @@ export async function main(argv: string[]): Promise<void> {
     secretAccessKey,
     prefix,
     env,
+    salt: saltB64,
+    iterations: DEFAULT_PBKDF2_ITERATIONS,
   };
 
   if (flags.json === "true") {

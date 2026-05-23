@@ -139,6 +139,8 @@ function decodeBlob(out: string): {
   secretAccessKey: string;
   prefix: string;
   env: string;
+  salt: string;
+  iterations: number;
 } {
   const trimmed = out.trim();
   expect(trimmed.startsWith(CFG_BLOB_PREFIX)).toBe(true);
@@ -432,5 +434,41 @@ describe("runtime-token — --json secret-warning path", () => {
 
     // Blob still on stdout
     expect(decodeBlob(joinStdout()).env).toBe("dev");
+  });
+});
+
+describe("runtime-token — salt + iterations (v0.10 §4)", () => {
+  beforeEach(() => captureSetup());
+  afterEach(() => captureRestore());
+
+  test("emits salt as standard base64 of cfg.encryption.salt's UTF-8 bytes (PBKDF2-input-identical)", async () => {
+    await saveConfigFile(TEST_REPO, "dev", sampleConfig);
+    await setKey(TEST_REPO, "dev", generateKey());
+
+    (process.stdin as any).isTTY = false;
+    try {
+      await main(["--env=dev", "--no-validate"]);
+    } catch (e: any) {
+      if (!String(e.message).startsWith("__exit:0")) throw e;
+    }
+
+    const blob = decodeBlob(joinStdout());
+    // The wire `salt` field is standard base64 (note: standard alphabet,
+    // with padding) — distinct from the outer blob's base64url-no-pad.
+    expect(typeof blob.salt).toBe("string");
+    expect(blob.salt.length).toBeGreaterThan(0);
+    // Standard base64 alphabet only.
+    expect(/^[A-Za-z0-9+/]+={0,2}$/.test(blob.salt)).toBe(true);
+
+    // Byte-identity check: the bytes a runtime reader feeds to PBKDF2
+    // (base64-decode of `salt`) must equal exactly the bytes the CLI's
+    // crypto path feeds to PBKDF2 (UTF-8 of cfg.encryption.salt).
+    const readerSaltBytes = Buffer.from(blob.salt, "base64");
+    const cliPbkdf2InputBytes = Buffer.from(sampleConfig.encryption.salt, "utf8");
+    expect(Array.from(readerSaltBytes)).toEqual(Array.from(cliPbkdf2InputBytes));
+
+    // Iterations: stock CLI uses 600000 (v0.2 spec reference value).
+    expect(blob.iterations).toBe(600000);
+    expect(Number.isInteger(blob.iterations)).toBe(true);
   });
 });

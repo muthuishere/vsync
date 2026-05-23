@@ -1,6 +1,6 @@
 {
   "category": "config-blob",
-  "description": "VSYNC_CONFIG for AWS S3 (us-east-1) — typical cloud shape",
+  "description": "VSYNC_CONFIG for AWS S3 (us-east-1) — typical cloud shape; carries salt+iterations per v0.12 §2.1",
   "inputs": {},
   "expected": {
     "config_json": {
@@ -11,10 +11,12 @@
       "accessKeyId": "AKIAEXAMPLE0000000000",
       "secretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
       "prefix": "myapp/",
-      "env": "prod"
+      "env": "prod",
+      "salt": "NvTGExRJ8+Kn8dwdXrPv0w==",
+      "iterations": 600000
     },
     "error": null
   },
-  "generated_by": "vsync@6532ab8a093c279f6a627772683bba779f48f384",
+  "generated_by": "vsync@479eda678ef43a47a15330b4adea6dc5aec35187",
   "spec_version": "v0.12"
 }

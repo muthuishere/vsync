@@ -496,10 +496,20 @@ function buildConfigBlob(inner: object): Uint8Array {
 function emitConfigBlob(outDir: string, tag: string): void {
   const cat: Category = "config-blob";
 
+  // v0.12 §2.1 / v0.10 §4: the runtime lib has no separate salt source for
+  // RQE1 PBKDF2, so the inner JSON now carries `salt` (base64 16 bytes) and
+  // `iterations`. Per-vector salt is derived deterministically the same way
+  // every other secret in this corpus is — sha256("vsync-vec-v0.12|<cat>|
+  // <name>|salt") → first 16 bytes → base64.
+  const PBKDF2_ITERATIONS = 600_000;
+  function configSalt(name: string): string {
+    return deterministicSalt(cat, name);
+  }
+
   const positives: { name: string; description: string; inner: Record<string, unknown> }[] = [
     {
       name: "positive-aws",
-      description: "VSYNC_CONFIG for AWS S3 (us-east-1) — typical cloud shape",
+      description: "VSYNC_CONFIG for AWS S3 (us-east-1) — typical cloud shape; carries salt+iterations per v0.12 §2.1",
       inner: {
         v: 1,
         endpoint: "https://s3.amazonaws.com",
@@ -509,11 +519,13 @@ function emitConfigBlob(outDir: string, tag: string): void {
         secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
         prefix: "myapp/",
         env: "prod",
+        salt: configSalt("positive-aws"),
+        iterations: PBKDF2_ITERATIONS,
       },
     },
     {
       name: "positive-r2",
-      description: "VSYNC_CONFIG for Cloudflare R2 — explicit endpoint, region=auto",
+      description: "VSYNC_CONFIG for Cloudflare R2 — explicit endpoint, region=auto; carries salt+iterations per v0.12 §2.1",
       inner: {
         v: 1,
         endpoint: "https://abc123.r2.cloudflarestorage.com",
@@ -523,11 +535,13 @@ function emitConfigBlob(outDir: string, tag: string): void {
         secretAccessKey: "r2_secret_access_key_example",
         prefix: "web/",
         env: "staging",
+        salt: configSalt("positive-r2"),
+        iterations: PBKDF2_ITERATIONS,
       },
     },
     {
       name: "positive-minio",
-      description: "VSYNC_CONFIG for self-hosted MinIO — http endpoint, no prefix",
+      description: "VSYNC_CONFIG for self-hosted MinIO — http endpoint, no prefix; carries salt+iterations per v0.12 §2.1",
       inner: {
         v: 1,
         endpoint: "http://minio.internal:9000",
@@ -537,6 +551,8 @@ function emitConfigBlob(outDir: string, tag: string): void {
         secretAccessKey: "minioadmin",
         prefix: "",
         env: "dev",
+        salt: configSalt("positive-minio"),
+        iterations: PBKDF2_ITERATIONS,
       },
     },
   ];
@@ -559,9 +575,21 @@ function emitConfigBlob(outDir: string, tag: string): void {
     );
   }
 
-  // Negative 1 — wrong magic prefix (raw JSON, no "vsync-cfg-v1:").
+  // Negative 1 — wrong magic prefix (raw JSON, no "vsync-cfg-v1:"). Inner
+  // shape doesn't need salt/iterations because this vector tests the magic-
+  // prefix check, not the inner JSON.
   {
-    const bin = new TextEncoder().encode(JSON.stringify(positives[0].inner));
+    const negativeInner = {
+      v: 1,
+      endpoint: "https://s3.amazonaws.com",
+      region: "us-east-1",
+      bucket: "acme-secrets",
+      accessKeyId: "AKIAEXAMPLE0000000000",
+      secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      prefix: "myapp/",
+      env: "prod",
+    };
+    const bin = new TextEncoder().encode(JSON.stringify(negativeInner));
     writeVector(
       outDir,
       cat,

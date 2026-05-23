@@ -7,6 +7,6 @@
   "expected": {
     "error": "ConfigUnsupportedVersionError"
   },
-  "generated_by": "vsync@6532ab8a093c279f6a627772683bba779f48f384",
+  "generated_by": "vsync@479eda678ef43a47a15330b4adea6dc5aec35187",
   "spec_version": "v0.12"
 }

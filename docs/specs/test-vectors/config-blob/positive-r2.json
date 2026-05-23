@@ -1,6 +1,6 @@
 {
   "category": "config-blob",
-  "description": "VSYNC_CONFIG for Cloudflare R2 — explicit endpoint, region=auto",
+  "description": "VSYNC_CONFIG for Cloudflare R2 — explicit endpoint, region=auto; carries salt+iterations per v0.12 §2.1",
   "inputs": {},
   "expected": {
     "config_json": {
@@ -11,10 +11,12 @@
       "accessKeyId": "r2_access_key_id_example",
       "secretAccessKey": "r2_secret_access_key_example",
       "prefix": "web/",
-      "env": "staging"
+      "env": "staging",
+      "salt": "f5n4vsEWbGjjHc47wtnMJQ==",
+      "iterations": 600000
     },
     "error": null
   },
-  "generated_by": "vsync@6532ab8a093c279f6a627772683bba779f48f384",
+  "generated_by": "vsync@479eda678ef43a47a15330b4adea6dc5aec35187",
   "spec_version": "v0.12"
 }
