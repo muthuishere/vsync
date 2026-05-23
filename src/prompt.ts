@@ -25,6 +25,7 @@ export function askText(label: string, defaultValue?: string): string {
     defaultValue !== undefined ? `${label} [${defaultValue}]: ` : `${label}: `;
   const v = (globalThis as any).prompt(promptStr);
   if (v === null || v === undefined) {
+    if (defaultValue !== undefined) return defaultValue;
     throw new Error("aborted (no input)");
   }
   const trimmed = String(v).trim();
