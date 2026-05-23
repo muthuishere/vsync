@@ -1,0 +1,14 @@
+{
+  "category": "rqe1-decrypt-error",
+  "description": "placeholder — will be replaced by generator; demonstrates file-pair convention",
+  "inputs": {
+    "passphrase": "TODO"
+  },
+  "expected": {
+    "plaintext_hex": null,
+    "error": null
+  },
+  "generated_by": "placeholder@manual",
+  "spec_version": "v0.12",
+  "placeholder": true
+}
