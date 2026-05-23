@@ -30,6 +30,8 @@ const SUBCOMMANDS = [
   "docs",
   "profile",
   "status",
+  "runtime-token",
+  "rotate-passphrase",
 ] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
@@ -71,6 +73,10 @@ function usage(code = 0): never {
   out("");
   out("docs");
   out("  docs                            print the onboarding reference to stdout");
+  out("");
+  out("rotation");
+  out("  runtime-token --env=<env>       mint the VSYNC_CONFIG bootstrap blob for runtime libs");
+  out("  rotate-passphrase --env=<env>   re-encrypt the bundle under a new passphrase");
   out("");
   out("All commands accept --repo=<name> (defaults: $SECRETS_SYNC_REPO →");
   out("package.json::name → git basename → cwd basename) and --interactive.");
@@ -145,6 +151,16 @@ switch (subcommand as Subcommand) {
   }
   case "status": {
     const { main } = await import("./status");
+    await main(subArgv);
+    break;
+  }
+  case "runtime-token": {
+    const { main } = await import("./runtime-token");
+    await main(subArgv);
+    break;
+  }
+  case "rotate-passphrase": {
+    const { main } = await import("./rotate-passphrase");
     await main(subArgv);
     break;
   }

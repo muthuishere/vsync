@@ -36,3 +36,90 @@ export function unwrap(blob: Uint8Array): { ts: string; payload: Uint8Array } {
   const payload = blob.slice(HEADER_LEN);
   return { ts, payload };
 }
+
+// ─── Manifest meta cell (v0.10) ─────────────────────────────────────────
+//
+// The meta cell is a small JSON object describing the rotation state of a
+// bundle. It sits alongside the bundle on S3 (e.g. at `<prefix>latest.meta`)
+// and is read by `vsync rotate-passphrase` to compute the next `gen`
+// counter. Old readers ignore it (the meta cell is a separate S3 object,
+// not part of the RQEM0001 wire envelope). Pre-0.10 bundles have no meta
+// cell — callers treat that as `gen = 0`.
+//
+// Forward-compat: unknown JSON fields are dropped on parse, so v0.11+ can
+// add fields without breaking v0.10 readers.
+
+/** Manifest meta cell. All fields optional — a pre-0.10 bundle has `{}`. */
+export type ManifestMeta = {
+  /** Monotonic rotation counter. 0 = never rotated. */
+  gen?: number;
+  /** Previous `gen`. Always `gen - 1` on rotation; absent on a fresh push. */
+  prev_gen?: number;
+  /** ISO 8601 timestamp of the rotation that produced this meta. */
+  rotated_at?: string;
+};
+
+/** Serialise a manifest meta cell to JSON. */
+export function serializeManifestMeta(meta: ManifestMeta): string {
+  validateManifestMeta(meta);
+  const out: Record<string, unknown> = {};
+  if (meta.gen !== undefined) out.gen = meta.gen;
+  if (meta.prev_gen !== undefined) out.prev_gen = meta.prev_gen;
+  if (meta.rotated_at !== undefined) out.rotated_at = meta.rotated_at;
+  return JSON.stringify(out);
+}
+
+/**
+ * Parse a manifest meta cell JSON. Empty string → `{}` (no meta cell on
+ * S3 yet, i.e. pre-0.10 bundle). Unknown fields are dropped. Throws on
+ * malformed JSON, non-object payload, or a value out of the documented
+ * shape (e.g. non-integer / negative `gen`).
+ */
+export function parseManifestMeta(json: string): ManifestMeta {
+  if (!json || json.trim() === "") return {};
+  const parsed = JSON.parse(json);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("manifest meta: not a JSON object");
+  }
+  const obj = parsed as Record<string, unknown>;
+  const out: ManifestMeta = {};
+  if (obj.gen !== undefined) {
+    if (typeof obj.gen !== "number" || !Number.isInteger(obj.gen) || obj.gen < 0) {
+      throw new Error("manifest meta: gen must be a non-negative integer");
+    }
+    out.gen = obj.gen;
+  }
+  if (obj.prev_gen !== undefined) {
+    if (
+      typeof obj.prev_gen !== "number" ||
+      !Number.isInteger(obj.prev_gen) ||
+      obj.prev_gen < 0
+    ) {
+      throw new Error("manifest meta: prev_gen must be a non-negative integer");
+    }
+    out.prev_gen = obj.prev_gen;
+  }
+  if (obj.rotated_at !== undefined) {
+    if (typeof obj.rotated_at !== "string") {
+      throw new Error("manifest meta: rotated_at must be a string");
+    }
+    out.rotated_at = obj.rotated_at;
+  }
+  return out;
+}
+
+function validateManifestMeta(meta: ManifestMeta): void {
+  if (meta.gen !== undefined) {
+    if (!Number.isInteger(meta.gen) || meta.gen < 0) {
+      throw new Error("manifest meta: gen must be a non-negative integer");
+    }
+  }
+  if (meta.prev_gen !== undefined) {
+    if (!Number.isInteger(meta.prev_gen) || meta.prev_gen < 0) {
+      throw new Error("manifest meta: prev_gen must be a non-negative integer");
+    }
+  }
+  if (meta.rotated_at !== undefined && typeof meta.rotated_at !== "string") {
+    throw new Error("manifest meta: rotated_at must be a string");
+  }
+}

@@ -354,6 +354,49 @@ describe("appendAuditRow", () => {
   });
 });
 
+describe("rotate audit action (v0.10)", () => {
+  test("'rotate' is an accepted action — round-trips through gatherRowMetadata", async () => {
+    const row = await gatherRowMetadata("rotate", "20260523-100000");
+    expect(row.action).toBe("rotate");
+    expect(row.version_ts).toBe("20260523-100000");
+  });
+
+  test("'rotate' rows survive CSV round-trip", () => {
+    const row = sampleRow({
+      action: "rotate",
+      version_ts: "20260523-100000",
+      meta: JSON.stringify({ event: "rotate", gen: 3, prev_gen: 2 }),
+    });
+    const csv = AUDIT_HEADER + "\n" + rowToCsv(row) + "\n";
+    const parsed = parseAuditCsv(csv);
+    expect(parsed[0].action).toBe("rotate");
+    expect(JSON.parse(parsed[0].meta)).toEqual({
+      event: "rotate",
+      gen: 3,
+      prev_gen: 2,
+    });
+  });
+
+  test("'rotate' rows append cleanly to the log alongside push/pull", async () => {
+    const client = new FakeClient();
+    await appendAuditRow(client, "acme", "dev", sampleRow({ action: "push" }));
+    await appendAuditRow(
+      client,
+      "acme",
+      "dev",
+      sampleRow({
+        action: "rotate",
+        ts: "2026-05-23T10:00:00.000Z",
+        version_ts: "20260523-100000",
+        meta: JSON.stringify({ event: "rotate", gen: 1, prev_gen: 0 }),
+      }),
+    );
+    const rows = await readAuditLog(client, "acme", "dev");
+    expect(rows.length).toBe(2);
+    expect(rows[1].action).toBe("rotate");
+  });
+});
+
 describe("readAuditLog", () => {
   test("returns [] when the object doesn't exist", async () => {
     const client = new FakeClient();

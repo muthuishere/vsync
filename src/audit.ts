@@ -23,7 +23,7 @@ import type { S3Credentials } from "./s3";
 // ---------------------------------------------------------------------------
 // Types
 
-export type AuditAction = "pull" | "push" | "import" | "export";
+export type AuditAction = "pull" | "push" | "import" | "export" | "rotate";
 
 export type AuditRow = {
   ts: string;
