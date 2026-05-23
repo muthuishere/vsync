@@ -1,0 +1,21 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Build / dist
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
