@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vsync-s3-client"
+version = "0.1.0"
+description = "Read-side runtime library for the vsync ecosystem — pull, decrypt, and access a vault from S3 in one round trip."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "muthuishere", email = "muthuishere@gmail.com" }]
+keywords = ["vsync", "secrets", "s3", "config"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Security :: Cryptography",
+  "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+  "boto3>=1.28",
+  "cryptography>=41.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/muthuishere/secret-lib"
+Specification = "https://github.com/muthuishere/secret-lib/blob/main/docs/specs/v0.12-vsync-s3-client.md"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "moto[s3]>=5.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vsync_s3_client"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"
