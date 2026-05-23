@@ -1,0 +1,14 @@
+{
+  "category": "rqe1-decrypt-error",
+  "description": "Valid RQE1 envelope; inputs.passphrase is wrong → WrongPassphraseError",
+  "inputs": {
+    "passphrase": "definitely-not-the-passphrase",
+    "salt": "VtjAVyO1O3xyW4rnMcVx1w=="
+  },
+  "expected": {
+    "plaintext_hex": null,
+    "error": "WrongPassphraseError"
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

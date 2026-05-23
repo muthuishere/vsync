@@ -1,0 +1,13 @@
+{
+  "category": "error-taxonomy",
+  "description": "Magic flipped on the inner bundle → BundleCorruptError (not WrongPassphraseError)",
+  "inputs": {
+    "passphrase": "passphrase",
+    "salt": "SRufJSF6UAEK6nhwOhfHUg=="
+  },
+  "expected": {
+    "error": "BundleCorruptError"
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

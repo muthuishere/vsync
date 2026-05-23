@@ -1,0 +1,15 @@
+{
+  "category": "rqem0001-manifest",
+  "description": "RQEM0001 manifest with gen=42; embedded ts matches remote",
+  "inputs": {
+    "passphrase": "n/a — plaintext manifest layer",
+    "remote_ts": "20260501-091500"
+  },
+  "expected": {
+    "embedded_ts": "20260501-091500",
+    "payload_hex": "7b202267656e223a203432207d",
+    "error": null
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

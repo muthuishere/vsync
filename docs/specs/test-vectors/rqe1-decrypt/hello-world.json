@@ -1,0 +1,15 @@
+{
+  "category": "rqe1-decrypt",
+  "description": "Decrypt a passphrase-derived RQE1 envelope; expect 'hello world' UTF-8",
+  "inputs": {
+    "passphrase": "correct horse battery staple",
+    "salt": "20ZiDJFKLLkDsDUiWSMn3g=="
+  },
+  "expected": {
+    "plaintext_hex": "68656c6c6f20776f726c64",
+    "plaintext_utf8": "hello world",
+    "error": null
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

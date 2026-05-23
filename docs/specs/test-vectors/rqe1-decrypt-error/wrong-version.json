@@ -1,0 +1,14 @@
+{
+  "category": "rqe1-decrypt-error",
+  "description": "RQE1 magic byte 3 flipped (1→2) → UnsupportedSpecVersionError",
+  "inputs": {
+    "passphrase": "correct horse battery staple",
+    "salt": "4S+STecP49AGGFQ0k37Ztg=="
+  },
+  "expected": {
+    "plaintext_hex": null,
+    "error": "UnsupportedSpecVersionError"
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

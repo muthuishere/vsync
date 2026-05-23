@@ -1,0 +1,32 @@
+{
+  "category": "fallback-chain",
+  "description": "Key present in vault, env, AND defaults → vault wins",
+  "inputs": {
+    "bin": null,
+    "vault": {
+      "DATABASE_URL": "postgres://vault"
+    },
+    "env": {
+      "DATABASE_URL": "postgres://env"
+    },
+    "defaults": {
+      "DATABASE_URL": "postgres://default"
+    },
+    "queries": [
+      "DATABASE_URL"
+    ]
+  },
+  "expected": {
+    "results": [
+      {
+        "key": "DATABASE_URL",
+        "value": "postgres://vault",
+        "source": "vault",
+        "has": true
+      }
+    ],
+    "error": null
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

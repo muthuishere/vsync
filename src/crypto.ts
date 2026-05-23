@@ -38,8 +38,25 @@ export async function encrypt(
   password: string,
   salt: string,
 ): Promise<Uint8Array> {
-  const key = await deriveKey(password, salt);
   const iv = crypto.getRandomValues(new Uint8Array(IV_LEN));
+  return encryptWithIV(data, password, salt, iv);
+}
+
+// Deterministic variant — the caller supplies the 12-byte IV. Used by the
+// test-vector generator (scripts/generate-test-vectors.ts) so the corpus is
+// byte-stable across machines. Production callers MUST use encrypt() above,
+// which picks a fresh random IV per call. Reusing an IV+key pair across two
+// distinct plaintexts breaks AES-GCM confidentiality.
+export async function encryptWithIV(
+  data: Uint8Array,
+  password: string,
+  salt: string,
+  iv: Uint8Array,
+): Promise<Uint8Array> {
+  if (iv.byteLength !== IV_LEN) {
+    throw new Error(`encryptWithIV: iv must be ${IV_LEN} bytes (got ${iv.byteLength})`);
+  }
+  const key = await deriveKey(password, salt);
   const ct = new Uint8Array(
     await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, data),
   );

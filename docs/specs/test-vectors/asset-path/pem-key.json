@@ -1,0 +1,17 @@
+{
+  "category": "asset-path",
+  "description": "Materialize a fake PEM private key to a 0600 tempfile; bytes match exactly",
+  "inputs": {
+    "key": "TLS_PRIVATE_KEY_PEM",
+    "vault": {
+      "TLS_PRIVATE_KEY_PEM": "<binary — see .bin>"
+    }
+  },
+  "expected": {
+    "bytes_hex": "2d2d2d2d2d424547494e2050524956415445204b45592d2d2d2d2d0a4d494945765149424144414e42676b71686b6947397730424151454641415343424b63776767536a41674541416f494241514446414b454b4559425954455378780a2d2d2d2d2d454e442050524956415445204b45592d2d2d2d2d0a",
+    "mode_octal": "0600",
+    "error": null
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

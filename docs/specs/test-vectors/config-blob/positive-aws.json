@@ -1,0 +1,20 @@
+{
+  "category": "config-blob",
+  "description": "VSYNC_CONFIG for AWS S3 (us-east-1) — typical cloud shape",
+  "inputs": {},
+  "expected": {
+    "config_json": {
+      "v": 1,
+      "endpoint": "https://s3.amazonaws.com",
+      "region": "us-east-1",
+      "bucket": "acme-secrets",
+      "accessKeyId": "AKIAEXAMPLE0000000000",
+      "secretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+      "prefix": "myapp/",
+      "env": "prod"
+    },
+    "error": null
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

@@ -1,0 +1,20 @@
+{
+  "category": "config-blob",
+  "description": "VSYNC_CONFIG for Cloudflare R2 — explicit endpoint, region=auto",
+  "inputs": {},
+  "expected": {
+    "config_json": {
+      "v": 1,
+      "endpoint": "https://abc123.r2.cloudflarestorage.com",
+      "region": "auto",
+      "bucket": "acme-vault",
+      "accessKeyId": "r2_access_key_id_example",
+      "secretAccessKey": "r2_secret_access_key_example",
+      "prefix": "web/",
+      "env": "staging"
+    },
+    "error": null
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

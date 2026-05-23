@@ -1,0 +1,15 @@
+{
+  "category": "rqem0001-manifest",
+  "description": "Manifest embedded ts (20260429…) != remote ts (20260501…) → BundleCorruptError",
+  "inputs": {
+    "passphrase": "n/a",
+    "remote_ts": "20260501-091500"
+  },
+  "expected": {
+    "embedded_ts": "20260429-103045",
+    "payload_hex": null,
+    "error": "BundleCorruptError"
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

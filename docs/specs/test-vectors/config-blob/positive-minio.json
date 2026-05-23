@@ -1,0 +1,20 @@
+{
+  "category": "config-blob",
+  "description": "VSYNC_CONFIG for self-hosted MinIO — http endpoint, no prefix",
+  "inputs": {},
+  "expected": {
+    "config_json": {
+      "v": 1,
+      "endpoint": "http://minio.internal:9000",
+      "region": "us-east-1",
+      "bucket": "secrets",
+      "accessKeyId": "minioadmin",
+      "secretAccessKey": "minioadmin",
+      "prefix": "",
+      "env": "dev"
+    },
+    "error": null
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

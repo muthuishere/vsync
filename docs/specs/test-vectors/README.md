@@ -22,13 +22,26 @@ Each vector is a `.bin` + `.json` pair sharing a basename inside its category di
 
 ## Generation
 
-The vectors here are **placeholders**. They demonstrate the file-pair shape and the JSON schema; they carry no real cryptographic content.
+The vectors in this tree are **real** — they round-trip through `src/crypto.ts` and `src/manifest.ts` and carry the byte-level fixtures the language ports validate against. The Bun script `scripts/generate-test-vectors.ts` is the canonical producer.
 
-- The canonical generator will eventually be the Bun CLI subcommand `vsync test-vectors generate` (future surface, mentioned in v0.10 / v0.11 §6 — not yet implemented).
-- Until that ships, real vectors are produced by hand-running known inputs through the CLI and committing the resulting `.bin` alongside a hand-written `.json`.
-- Every real vector's JSON carries `generated_by: "vsync@<commit-sha>"` so a wrong vector can be traced to the commit that minted it. Placeholders use `generated_by: "placeholder@manual"`.
+- Every JSON carries `generated_by: "vsync@<commit-sha>"` so a wrong vector can be traced to the commit that minted it.
+- The generator is deterministic — same inputs (script + sha) → same bytes. After a regen, `git diff` on this tree should be empty unless the spec or the generator changed.
+- IVs and salts are derived per-vector from `sha256("vsync-vec-v0.12|<category>|<name>|<label>")` so the corpus is byte-stable across machines and language ports.
 
-Loaders must skip any vector whose JSON contains `"placeholder": true`. This flag is present on every file in this initial scaffold and must be removed (or set to `false`) when a real vector replaces the placeholder.
+## How to regenerate
+
+```bash
+# Use the current git HEAD sha as the generated_by tag (the default).
+bun scripts/generate-test-vectors.ts
+
+# Or pin the sha — useful in CI / when regenerating against a known commit.
+VSYNC_VECTOR_SHA=<sha> bun scripts/generate-test-vectors.ts
+
+# Or emit into a throwaway directory for inspection.
+bun scripts/generate-test-vectors.ts --out=/tmp/vsync-vectors
+```
+
+After a successful run, `git status docs/specs/test-vectors/` should be clean. A non-empty diff means either the spec moved or the generator changed — review the diff before committing.
 
 ## How libs consume them
 

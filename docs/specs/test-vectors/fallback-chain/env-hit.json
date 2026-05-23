@@ -1,0 +1,30 @@
+{
+  "category": "fallback-chain",
+  "description": "Key absent from vault, present in env and defaults → env wins",
+  "inputs": {
+    "bin": null,
+    "vault": {},
+    "env": {
+      "STRIPE_KEY": "sk_live_env"
+    },
+    "defaults": {
+      "STRIPE_KEY": "sk_test_default"
+    },
+    "queries": [
+      "STRIPE_KEY"
+    ]
+  },
+  "expected": {
+    "results": [
+      {
+        "key": "STRIPE_KEY",
+        "value": "sk_live_env",
+        "source": "env",
+        "has": true
+      }
+    ],
+    "error": null
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

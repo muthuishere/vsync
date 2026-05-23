@@ -1,0 +1,13 @@
+{
+  "category": "error-taxonomy",
+  "description": "RQE1 envelope advertised as v2 — lib understands v1 only → UnsupportedSpecVersionError",
+  "inputs": {
+    "passphrase": "passphrase",
+    "salt": "ePPEZeL/K4nPYV8YhwX0mA=="
+  },
+  "expected": {
+    "error": "UnsupportedSpecVersionError"
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

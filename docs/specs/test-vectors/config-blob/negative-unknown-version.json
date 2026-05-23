@@ -1,0 +1,11 @@
+{
+  "category": "config-blob",
+  "description": "Magic + gzip + base64url all valid but inner v=99 → ConfigUnsupportedVersionError",
+  "inputs": {},
+  "expected": {
+    "config_json": null,
+    "error": "ConfigUnsupportedVersionError"
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

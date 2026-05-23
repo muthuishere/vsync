@@ -1,0 +1,28 @@
+{
+  "category": "fallback-chain",
+  "description": "Key absent from vault and env → defaults are the floor",
+  "inputs": {
+    "bin": null,
+    "vault": {},
+    "env": {},
+    "defaults": {
+      "PORT": "8080"
+    },
+    "queries": [
+      "PORT"
+    ]
+  },
+  "expected": {
+    "results": [
+      {
+        "key": "PORT",
+        "value": "8080",
+        "source": "default",
+        "has": true
+      }
+    ],
+    "error": null
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

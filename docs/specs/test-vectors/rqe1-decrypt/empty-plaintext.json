@@ -1,0 +1,15 @@
+{
+  "category": "rqe1-decrypt",
+  "description": "Decrypt an empty-payload RQE1 envelope; expected plaintext is zero bytes",
+  "inputs": {
+    "passphrase": "correct horse battery staple",
+    "salt": "x+3cS0P6hBH3f/wva8TIrg=="
+  },
+  "expected": {
+    "plaintext_hex": "",
+    "plaintext_utf8": "",
+    "error": null
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

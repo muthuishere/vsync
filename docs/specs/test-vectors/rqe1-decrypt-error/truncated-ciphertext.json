@@ -1,0 +1,14 @@
+{
+  "category": "rqe1-decrypt-error",
+  "description": "RQE1 envelope clipped by 8 bytes (partial GCM tag) → BundleCorruptError",
+  "inputs": {
+    "passphrase": "correct horse battery staple",
+    "salt": "g8G0QyvxCE7zS200CHc+0A=="
+  },
+  "expected": {
+    "plaintext_hex": null,
+    "error": "BundleCorruptError"
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

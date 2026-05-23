@@ -1,0 +1,32 @@
+{
+  "category": "fallback-chain",
+  "description": "Key nowhere; value is null, source is 'missing', has is false",
+  "inputs": {
+    "bin": null,
+    "vault": {
+      "OTHER": "x"
+    },
+    "env": {
+      "ANOTHER": "y"
+    },
+    "defaults": {
+      "THIRD": "z"
+    },
+    "queries": [
+      "DATABASE_URL"
+    ]
+  },
+  "expected": {
+    "results": [
+      {
+        "key": "DATABASE_URL",
+        "value": null,
+        "source": "missing",
+        "has": false
+      }
+    ],
+    "error": null
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

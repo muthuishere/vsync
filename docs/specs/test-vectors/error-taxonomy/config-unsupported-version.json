@@ -1,0 +1,12 @@
+{
+  "category": "error-taxonomy",
+  "description": "Inner JSON v=99; loader must surface ConfigUnsupportedVersionError, not a generic decode error",
+  "inputs": {
+    "bin": "see-bin"
+  },
+  "expected": {
+    "error": "ConfigUnsupportedVersionError"
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

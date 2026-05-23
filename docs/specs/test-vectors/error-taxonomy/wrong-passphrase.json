@@ -1,0 +1,13 @@
+{
+  "category": "error-taxonomy",
+  "description": "Class identity: same wrong-passphrase blob must surface WrongPassphraseError in every lib",
+  "inputs": {
+    "passphrase": "wrong-passphrase",
+    "salt": "fxnxkDA5H5YK8gYCU3MBlQ=="
+  },
+  "expected": {
+    "error": "WrongPassphraseError"
+  },
+  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "spec_version": "v0.12"
+}

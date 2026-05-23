@@ -1,0 +1,1 @@
+{"v":1,"endpoint":"https://s3.amazonaws.com","region":"us-east-1","bucket":"acme-secrets","accessKeyId":"AKIAEXAMPLE0000000000","secretAccessKey":"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY","prefix":"myapp/","env":"prod"}
