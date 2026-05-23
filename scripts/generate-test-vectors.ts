@@ -292,7 +292,15 @@ async function emitRqe1DecryptError(outDir: string, tag: string): Promise<void> 
     corruptMagic,
   );
 
-  // 3. Truncated ciphertext — clip last 8 bytes (drops part of the GCM tag).
+  // 3. Truncated ciphertext — structurally short. AES-GCM raises the same
+  // InvalidTag exception for "tag bytes corrupted" and "ciphertext clipped
+  // mid-payload," so the lib disambiguates by length: an RQE1 envelope
+  // shorter than magic(4) + salt(16) + IV(12) + tag(16) = 48 bytes is
+  // structurally impossible → BundleCorruptError. Without the length
+  // heuristic the lib can't tell this case apart from bad-gcm-tag.bin
+  // (which is the canonical full-size, flipped-byte case that surfaces
+  // WrongPassphraseError). We emit the first 30 bytes of a real envelope
+  // so it looks like a valid prefix that was cut short.
   const truncName = "truncated-ciphertext";
   const truncSalt = deterministicSalt(cat, truncName);
   const truncIV = deterministicIV(cat, truncName);
@@ -302,14 +310,14 @@ async function emitRqe1DecryptError(outDir: string, tag: string): Promise<void> 
     truncSalt,
     truncIV,
   );
-  const truncated = fullEnvelope.slice(0, fullEnvelope.length - 8);
+  const truncated = fullEnvelope.slice(0, 30);
   writeVector(
     outDir,
     cat,
     "truncated-ciphertext",
     {
       category: cat,
-      description: "RQE1 envelope clipped by 8 bytes (partial GCM tag) → BundleCorruptError",
+      description: "RQE1 envelope structurally truncated to 30 bytes — below the 48-byte minimum (magic+salt+IV+tag) → BundleCorruptError",
       inputs: { passphrase: correctPassphrase, salt: truncSalt },
       expected: { plaintext_hex: null, error: "BundleCorruptError" },
       generated_by: tag,

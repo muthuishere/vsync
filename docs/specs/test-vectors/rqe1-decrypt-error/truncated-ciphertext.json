@@ -1,6 +1,6 @@
 {
   "category": "rqe1-decrypt-error",
-  "description": "RQE1 envelope clipped by 8 bytes (partial GCM tag) → BundleCorruptError",
+  "description": "RQE1 envelope structurally truncated to 30 bytes — below the 48-byte minimum (magic+salt+IV+tag) → BundleCorruptError",
   "inputs": {
     "passphrase": "correct horse battery staple",
     "salt": "g8G0QyvxCE7zS200CHc+0A=="
@@ -9,6 +9,6 @@
     "plaintext_hex": null,
     "error": "BundleCorruptError"
   },
-  "generated_by": "vsync@2283b294fb70f4d11964de904c4a65f4d2f84038",
+  "generated_by": "vsync@6532ab8a093c279f6a627772683bba779f48f384",
   "spec_version": "v0.12"
 }
