@@ -127,15 +127,17 @@ bun test
 ## Quickstart — owner (first time on a project)
 
 ```bash
-# 1. Generate the per-(repo, env) key + config. First-ever invocation prompts
-#    for S3 creds; subsequent inits pre-fill from ~/.config/vsync/defaults.
-vsync init dev
+# 1. Create a named profile holding your S3 creds (one per bucket).
+vsync profile add hetzner-personal
 
-# 2. Put your secrets under infra/vault/dev/ and push.
+# 2. Bind a (repo, env) to that profile — mints a fresh AES key.
+vsync init dev --profile=hetzner-personal
+
+# 3. Put your secrets under infra/vault/dev/ and push.
 echo "DATABASE_URL=postgres://..." > infra/vault/dev/.env.dev
 vsync push dev
 
-# 3. Hand the team a share file + passphrase (different channels).
+# 4. Hand the team a share file + passphrase (different channels).
 vsync export dev
 ```
 
@@ -189,7 +191,12 @@ Every command works fully via flags or fully via prompts.
 
 | Cmd | Purpose |
 |---|---|
-| `init <env>` | Generate AES key (→ keychain), write self-contained per-repo config, create the resolved vault folder, relocate an existing root `.env.<env>` if found (with a prompt). First-ever run on a machine also writes `~/.config/vsync/defaults` from the supplied values; subsequent runs pre-fill from defaults. Flags: `--bucket --endpoint --region --access-key --secret-key --use-ssl --vault-folder=<path> --migrate-from=<path> --no-migrate --audit=on\|off`. |
+| `profile list` | List named S3-credential profiles (name, endpoint, bucket). Secrets never printed. |
+| `profile show <name>` | Print one profile. Secret key masked (`****`), access-key tail-4 visible. Add `--reveal-secret` for plaintext (TTY-only; non-TTY refuses). |
+| `profile add <name>` | Interactively create a new profile under `~/.config/vsync/profiles/<name>.json` (mode 0600). Non-TTY refuses — write the JSON file directly in CI. |
+| `profile remove <name>` | Delete a profile. Confirms before delete; pass `--yes` to bypass in scripts. |
+| `init <env> --profile=<name>` | Generate AES key (→ keychain), write self-contained per-repo config from the named profile, create the resolved vault folder, relocate an existing root `.env.<env>` if found (with a prompt). `--profile=<name>` is required; on a TTY without it, picks from an interactive list. On existing config: four-way prompt (keep / overwrite / edit / abort). Flags: `--profile=<name> --vault-folder=<path> --migrate-from=<path> --no-migrate --audit=on\|off`. |
+| `status` | Summarise local configs, profiles, and orphans for this repo. Offline-first. Flags: `--check-remote` (reserved), `--json` (machine-readable), `--quiet` (silent on all-ok, exit 1 on any orphan). `--json` and `--quiet` are mutually exclusive. |
 | `export <env>` | Write a passphrase-encrypted `.share` file containing the full per-repo config + key. Flags: `--out=<path>` (default `./<repo>-<env>.share`), `--passphrase=<p>` (default: auto-generated readable passphrase), `--no-audit`, `--note=<text>`, `--meta key=value` (repeatable). |
 | `import <env> <file>` | Decrypt a `.share` file with its passphrase; write the per-repo config + save key to keychain. Idempotent — re-importing overwrites. Flags: `--passphrase=<p>`, `--file=<path>` (alt to positional), `--no-audit`, `--note=<text>`, `--meta key=value` (repeatable). |
 | `use <env>` | Symlink the chosen path → `<vaultFolder>/.env.<env>` so plain `dotenv.config()` works without a path arg. Default link path is `./.env`; override with `--link=<path>` (e.g. `--link=.env.dev` or `--link=apps/web/.env`). `vsync use` with no env prints the current target. **Refuses to touch an existing regular file at the link path — no `--force`, by design.** Replaces an existing symlink silently. Warns if the link's basename isn't `.gitignore`d. POSIX symlinks everywhere; Windows requires Developer Mode or an elevated terminal. |

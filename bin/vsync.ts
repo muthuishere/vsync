@@ -9,6 +9,14 @@
 //
 // Designed for `bunx @muthuishere/vsync <subcommand> ...`.
 
+import { migrateLegacyDefaultsIfNeeded } from "../src/migration";
+
+// One-shot migration check for v0.13: if a legacy ~/.config/vsync/defaults
+// file is present and no profiles/ dir exists yet, rename it to
+// defaults.bak and print a notice to stderr. Idempotent — quiet on
+// subsequent runs. See docs/specs/v0.13-profiles-init-status.md §5.
+migrateLegacyDefaultsIfNeeded();
+
 const SUBCOMMANDS = [
   "init",
   "export",
@@ -20,6 +28,8 @@ const SUBCOMMANDS = [
   "sync",
   "audit",
   "docs",
+  "profile",
+  "status",
 ] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
@@ -28,7 +38,16 @@ function usage(code = 0): never {
   out("usage: vsync <subcommand> [args...]");
   out("");
   out("setup");
-  out("  init <env> [flags]              create per-(repo, env) config + AES key");
+  out("  init <env> --profile=<name>     create per-(repo, env) config + AES key from a named profile");
+  out("");
+  out("profiles");
+  out("  profile list                    list named S3-credential profiles");
+  out("  profile show <name>             show one profile (secret masked unless --reveal-secret)");
+  out("  profile add  <name>             interactively create a new profile");
+  out("  profile remove <name>           delete a profile (refuses without confirm)");
+  out("");
+  out("visibility (offline)");
+  out("  status                          summarise local configs, profiles, and orphans");
   out("");
   out("sharing");
   out("  export <env> [--out=path]       write a passphrase-encrypted .share file");
@@ -116,6 +135,16 @@ switch (subcommand as Subcommand) {
   }
   case "docs": {
     const { main } = await import("./docs");
+    await main(subArgv);
+    break;
+  }
+  case "profile": {
+    const { main } = await import("./profile");
+    await main(subArgv);
+    break;
+  }
+  case "status": {
+    const { main } = await import("./status");
     await main(subArgv);
     break;
   }

@@ -1,38 +1,26 @@
 #!/usr/bin/env bun
 // Usage:
-//   vsync init <env> [flags] [--interactive]
+//   vsync init <env> --profile=<name> [flags] [--interactive]
 //
-// Sets up a new (repo, env) pair locally:
-//   1. Collects S3 bucket creds (via flags, prompts, or both — pre-fills
-//      from ~/.config/vsync/defaults if a previous init wrote it).
-//   2. Generates a fresh AES-256 key.
-//   3. Writes the self-contained per-repo file to
-//      ~/.config/vsync/<repo>/env_<env>.
-//   4. Saves the key to the OS keychain via Bun.secrets.
-//   5. On first-ever init: writes ~/.config/vsync/defaults from the
-//      supplied values so later inits are zero-prompt.
-//   6. Creates the resolved vault folder
-//      (infra/vault/<env>, or whatever --vault-folder set).
+// Sets up a new (repo, env) pair locally from a named profile:
+//   1. Resolves the profile (flag, TTY picker, or fail with hint).
+//   2. Composes the per-(repo, env) prefix = (profile.prefix ?? "") + env + "/"
+//      (or prompts for it if the profile has no prefix).
+//   3. Generates a fresh AES-256 key.
+//   4. Writes the self-contained per-repo file to
+//      ~/.config/vsync/<repo>/env_<env> with `initProfile` + `prefix`.
+//   5. Saves the key to the OS keychain via Bun.secrets.
+//   6. Creates the resolved vault folder (infra/vault/<env>, or whatever
+//      --vault-folder set).
 //   7. If a root .env.<env> exists and the new vault folder doesn't have
 //      one, prompts to mv it.
 //   8. Warns if `infra/vault/` (or the vault folder's parent) isn't in
 //      .gitignore.
 //   9. Prints the dotenv snippet so the consuming app can find the .env.
 //
-// Flags (any can be passed to skip its prompt):
-//   --repo=<name>            Override auto-detected repo name
-//   --bucket=<name>          S3 bucket
-//   --endpoint=<url>         S3 endpoint
-//   --region=<name>          S3 region
-//   --access-key=<id>        S3 access key ID
-//   --secret-key=<secret>    S3 secret access key
-//   --use-ssl=<true|false>   Force TLS (default true)
-//   --vault-folder=<path>    Override default infra/vault/<env> for monorepos
-//   --migrate-from=<path>    Use a non-default source for the .env relocation
-//   --no-migrate             Skip the root .env.<env> migration prompt entirely
-//   --audit=on|off           Enable/disable the per-(repo, env) audit log
-//                            (default on; prompted interactively when unset)
-//   --interactive            Prompt even for fields already provided via flags
+// On existing config: four-way prompt (keep / overwrite / edit / abort),
+// with overwrite gated behind a typed 'o' (no bare-Enter shortcut).
+// See docs/specs/v0.13-profiles-init-status.md §3.
 
 import { existsSync, mkdirSync, renameSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -40,24 +28,26 @@ import { parseArgs } from "../src/argv";
 import { getRepoName, getRepoRoot } from "../src/repo";
 import {
   saveConfigFile,
+  loadConfigFile,
   configFilePath,
   DEFAULT_AUDIT_ENABLED,
   type ConfigFile,
 } from "../src/repoconfig";
-import { setKey, generateKey } from "../src/keychain";
+import { setKey, generateKey, getKey } from "../src/keychain";
 import {
-  loadDefaults,
-  saveDefaults,
-  defaultsFilePath,
-  type Defaults,
-} from "../src/defaults";
+  loadProfile,
+  listProfiles,
+  profileExists,
+  ProfileNotFoundError,
+  type Profile,
+} from "../src/profiles";
 import { askText, askBool, isTty } from "../src/prompt";
 
 function envFromArg(env?: string): string {
   if (!env) {
-    console.error("usage: vsync init <env> [flags]");
+    console.error("usage: vsync init <env> --profile=<name> [flags]");
     console.error(
-      "  e.g. vsync init dev --bucket=my-bucket --endpoint=https://s3.example.com",
+      "  e.g. vsync init dev --profile=hetzner-personal",
     );
     process.exit(1);
   }
@@ -84,6 +74,169 @@ function parseOnOff(raw: string, label: string): boolean {
   process.exit(1);
 }
 
+/** Pick a profile interactively on a TTY. Returns null on quit/empty. */
+async function pickProfileInteractive(): Promise<string | null> {
+  const all = await listProfiles();
+  if (all.length === 0) {
+    console.error(
+      "no profiles configured. Run `vsync profile add <name>` first, " +
+        "then `vsync init <env> --profile=<name>`.",
+    );
+    process.exit(1);
+  }
+  console.log("Pick a profile:");
+  for (let i = 0; i < all.length; i++) {
+    const p = all[i];
+    const ep = p.endpoint.replace(/^https?:\/\//, "");
+    console.log(`  ${i + 1}) ${p.name}       ${ep} / ${p.bucket}`);
+  }
+  console.log("  q) quit");
+  console.log("");
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const raw = askText(">", "");
+    const t = raw.trim().toLowerCase();
+    if (!t || t === "q") return null;
+    const n = Number.parseInt(t, 10);
+    if (Number.isInteger(n) && n >= 1 && n <= all.length) {
+      return all[n - 1].name;
+    }
+    console.log(`invalid selection "${raw}". Try again (1..${all.length} or q).`);
+  }
+  console.error("too many invalid attempts.");
+  process.exit(1);
+}
+
+/** Resolve the chosen profile name from flags or interactive picker. */
+async function resolveProfileName(
+  flags: Record<string, string>,
+): Promise<string> {
+  const flagged = flags.profile;
+  if (flagged && flagged !== "") {
+    if (!(await profileExists(flagged))) {
+      const existing = (await listProfiles()).map((p) => p.name);
+      console.error(`profile "${flagged}" not found.`);
+      if (existing.length > 0) {
+        console.error(`Existing: ${existing.join(", ")}.`);
+      } else {
+        console.error("(no profiles on this machine yet)");
+      }
+      console.error(`Run \`vsync profile add ${flagged}\` to create.`);
+      process.exit(1);
+    }
+    return flagged;
+  }
+
+  if (!isTty()) {
+    console.error(
+      "missing --profile=<name>. Run `vsync profile list` to see available profiles.",
+    );
+    process.exit(1);
+  }
+
+  const picked = await pickProfileInteractive();
+  if (picked === null) {
+    process.exit(0);
+  }
+  return picked;
+}
+
+/** Compose the env prefix from a profile.  */
+async function resolvePrefix(
+  profile: Profile,
+  repo: string,
+  env: string,
+  interactive: boolean,
+  existing?: string,
+): Promise<string> {
+  if (profile.prefix !== undefined) {
+    return `${profile.prefix}${env}/`;
+  }
+  // Profile has no prefix — prompt for the full prefix.
+  const suggestion = existing ?? `${repo}/${env}/`;
+  if (!isTty()) {
+    return suggestion;
+  }
+  console.log(`\nProfile has no prefix.`);
+  let raw = askText(`Full S3 prefix for this env`, suggestion);
+  if (!raw) raw = suggestion;
+  if (!raw.endsWith("/")) raw += "/";
+  return raw;
+}
+
+type ExistingConfigChoice = "keep" | "overwrite" | "edit" | "abort";
+
+/**
+ * Render existing-config summary and ask the four-way prompt. Decision-only;
+ * the caller acts on it.
+ */
+function promptExistingConfig(
+  cfg: ConfigFile,
+  repo: string,
+  env: string,
+  profileStillPresent: boolean,
+): ExistingConfigChoice {
+  console.log(`\nConfig exists for ${repo} / ${env}:`);
+  const profileName = cfg.initProfile ?? "(none recorded)";
+  const profileSuffix = cfg.initProfile
+    ? profileStillPresent
+      ? " [still present]"
+      : " [REMOVED]"
+    : "";
+  console.log(`  profile (at init):  ${profileName}${profileSuffix}`);
+  console.log(`  endpoint:           ${cfg.s3.endpoint}`);
+  console.log(`  bucket:             ${cfg.s3.bucket}`);
+  console.log(`  prefix:             ${cfg.prefix ?? "(implicit)"}`);
+  console.log(`  vault folder:       ${cfg.files?.vaultFolder ?? `infra/vault/${env}`}`);
+  console.log("");
+  console.log("What now?");
+  console.log("  [k] keep      — exit, no changes               (default)");
+  console.log("  [o] overwrite — re-init this env from scratch");
+  console.log("  [e] edit      — re-prompt with current values as defaults");
+  console.log("  [a] abort     — exit, no changes (alias of keep)");
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const raw = askText(">", "");
+    const t = raw.trim().toLowerCase();
+    if (!t || t === "k" || t === "keep") return "keep";
+    if (t === "a" || t === "abort") return "abort";
+    if (t === "e" || t === "edit") return "edit";
+    // Overwrite MUST be typed explicitly — no bare-Enter shortcut.
+    if (t === "o" || t === "overwrite") return "overwrite";
+    console.log(`invalid choice "${raw}". Try k, o, e, or a.`);
+  }
+  console.error("too many invalid attempts.");
+  process.exit(1);
+}
+
+/**
+ * Prompt for a four-way choice when the existing config cannot be decrypted
+ * (keychain entry is gone). Only overwrite/abort are offered.
+ */
+function promptCorruptExisting(
+  repo: string,
+  env: string,
+  filePath: string,
+): "overwrite" | "abort" {
+  console.log(
+    `\nConfig exists at ${filePath} but no keychain key for ${repo}/${env}.`,
+  );
+  console.log("Cannot show current values.");
+  console.log("");
+  console.log("  [o] overwrite — re-init this env from scratch");
+  console.log("  [a] abort     — exit, no changes               (default)");
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const raw = askText(">", "");
+    const t = raw.trim().toLowerCase();
+    if (!t || t === "a" || t === "abort") return "abort";
+    if (t === "o" || t === "overwrite") return "overwrite";
+    console.log(`invalid choice "${raw}". Try o or a.`);
+  }
+  console.error("too many invalid attempts.");
+  process.exit(1);
+}
+
 export async function main(argv: string[]): Promise<void> {
   const { positional, flags } = parseArgs(argv);
   const env = envFromArg(positional[0]);
@@ -92,119 +245,143 @@ export async function main(argv: string[]): Promise<void> {
   const repo = await getRepoName({ override: flags.repo });
   const root = await getRepoRoot();
 
-  // Collision check (spec v0.9 §5): if a config already exists at the
-  // resolved (repo, env) path, abort rather than silently overwrite.
-  // Two different repos can resolve to the same canonical name; the user
-  // recovers by re-running with --repo=<custom-name>.
   const targetConfigPath = configFilePath(repo, env);
-  if (existsSync(targetConfigPath)) {
-    console.error(`✗ Config already exists at:`);
-    console.error(`    ${targetConfigPath}`);
-    console.error("");
-    console.error(
-      "If this is a different repo that happens to resolve to the same name,",
-    );
-    console.error("re-run with --repo=<custom-name>:");
-    console.error("");
-    console.error(`    vsync init ${env} --repo=my-custom-name`);
-    console.error("");
-    console.error(
-      "If this is the repo you initialised before, you don't need to init",
-    );
-    console.error(
-      `again — your existing keychain entry is intact. Run \`vsync pull ${env}\``,
-    );
-    console.error("to fetch the latest vault.");
-    process.exit(1);
-  }
+  const existingConfigOnDisk = existsSync(targetConfigPath);
 
-  const existingDefaults = await loadDefaults();
-  const defaultS3 = existingDefaults?.s3 ?? {};
-
-  // (flag value | prompt with default | hard default)
-  const get = (
-    flagKey: string,
-    label: string,
-    fallback?: string,
-  ): string => {
-    const v = flags[flagKey];
-    if (v !== undefined && v !== "" && !interactive) return v;
-    const prefilled = v ?? fallback;
+  // ─── Existing-config branch ──────────────────────────────────────────
+  let editDefaults: ConfigFile | null = null;
+  if (existingConfigOnDisk) {
     if (!isTty()) {
-      if (prefilled !== undefined && prefilled !== "") return prefilled;
-      throw new Error(
-        `missing ${label} (no TTY for prompts — pass --${flagKey}=…)`,
+      console.error(`✗ Config already exists at:`);
+      console.error(`    ${targetConfigPath}`);
+      console.error("");
+      console.error(
+        `config exists for ${repo}/${env}; pass --interactive on a TTY to choose ` +
+          `keep/overwrite/edit, or remove ~/.config/vsync/<repo>/env_${env} manually.`,
       );
+      process.exit(1);
     }
-    return askText(label, prefilled);
-  };
 
-  console.log(`Setting up ${repo} / ${env}\n`);
-  console.log(`Repo: ${repo}   (override with --repo=<name>)`);
-  console.log(`Env:  ${env}`);
-  if (existingDefaults) {
-    console.log(`Defaults: ~/.config/vsync/defaults (pre-filling prompts)\n`);
-  } else {
-    console.log("Press Ctrl-C to abort. Defaults shown in [brackets].\n");
+    // On a TTY — try to decrypt to show the user a summary first.
+    let cfgOnDisk: ConfigFile | null = null;
+    try {
+      cfgOnDisk = await loadConfigFile(repo, env);
+    } catch {
+      cfgOnDisk = null;
+    }
+    const keyPresent = (await getKey(repo, env)) !== null;
+
+    if (!cfgOnDisk || !keyPresent) {
+      const choice = promptCorruptExisting(repo, env, targetConfigPath);
+      if (choice === "abort") {
+        return;
+      }
+      // overwrite: fall through to the normal flow.
+    } else {
+      // We have full visibility — show summary + 4-way.
+      const profileStillPresent =
+        cfgOnDisk.initProfile === undefined
+          ? false
+          : await profileExists(cfgOnDisk.initProfile);
+      const choice = promptExistingConfig(cfgOnDisk, repo, env, profileStillPresent);
+      if (choice === "keep" || choice === "abort") {
+        console.log("no changes.");
+        return;
+      }
+      if (choice === "edit") {
+        editDefaults = cfgOnDisk;
+      }
+      // overwrite & edit: fall through.
+    }
   }
 
-  const endpoint = get("endpoint", "S3 endpoint URL", defaultS3.endpoint);
-  const region = get("region", "S3 region", defaultS3.region);
-  const bucket = get("bucket", "S3 bucket name", defaultS3.bucket);
-  const accessKeyId = get("access-key", "S3 access key ID", defaultS3.accessKeyId);
-  const secretAccessKey = get(
-    "secret-key",
-    "S3 secret access key",
-    defaultS3.secretAccessKey,
+  // ─── Profile resolution ──────────────────────────────────────────────
+  // For edit mode, default the picker to the recorded profile.
+  let profileName: string;
+  if (editDefaults && !flags.profile) {
+    flags.profile = editDefaults.initProfile ?? "";
+  }
+  if (editDefaults && flags.profile && !(await profileExists(flags.profile))) {
+    // The recorded profile was removed since init — fall back to a fresh pick.
+    delete flags.profile;
+  }
+  profileName = await resolveProfileName(flags);
+
+  let profile: Profile;
+  try {
+    profile = await loadProfile(profileName);
+  } catch (err) {
+    if (err instanceof ProfileNotFoundError) {
+      console.error(err.message);
+      process.exit(1);
+    }
+    throw err;
+  }
+
+  console.log(`\nSetting up ${repo} / ${env} with profile "${profileName}"\n`);
+
+  // ─── Prefix combination ─────────────────────────────────────────────
+  const existingPrefix = editDefaults?.prefix;
+  const prefix = await resolvePrefix(
+    profile,
+    repo,
+    env,
+    interactive,
+    existingPrefix,
   );
-  const useSslRaw = flags["use-ssl"];
-  const useSsl =
-    useSslRaw !== undefined && !interactive
-      ? useSslRaw !== "false"
-      : isTty()
-        ? askBool("Use TLS for S3?", useSslRaw !== "false" && (defaultS3.useSsl ?? true))
-        : defaultS3.useSsl ?? true;
 
+  // ─── useSsl derivation ──────────────────────────────────────────────
+  // Endpoint scheme is the source of truth (decision: useSsl removed from profile).
+  const useSsl = !profile.endpoint.toLowerCase().startsWith("http://");
+
+  // ─── Audit + vault-folder ───────────────────────────────────────────
   const vaultFolderOverride = flags["vault-folder"];
-  const defaultVaultFolder = `infra/vault/${env}`;
-  const vaultFolder = vaultFolderOverride ?? defaultVaultFolder;
-  const hasVaultOverride = !!vaultFolderOverride && vaultFolderOverride !== defaultVaultFolder;
+  const defaultVaultFolder =
+    editDefaults?.files?.vaultFolder ?? `infra/vault/${env}`;
+  let vaultFolder = vaultFolderOverride ?? defaultVaultFolder;
+  if (interactive && isTty()) {
+    vaultFolder = askText("Vault folder", vaultFolder);
+  }
+  const hasVaultOverride =
+    !!vaultFolder && vaultFolder !== `infra/vault/${env}`;
 
-  // --audit=on|off — explicit flag wins; otherwise prompt when interactive
-  // (or no flag and TTY); otherwise default to enabled.
   const auditFlag = flags.audit;
   let auditEnabled: boolean;
   if (auditFlag !== undefined && !interactive) {
     auditEnabled = parseOnOff(auditFlag, "--audit");
   } else if (isTty() && (interactive || auditFlag === undefined)) {
     const prefilled =
-      auditFlag !== undefined ? parseOnOff(auditFlag, "--audit") : DEFAULT_AUDIT_ENABLED;
+      auditFlag !== undefined
+        ? parseOnOff(auditFlag, "--audit")
+        : (editDefaults?.audit?.enabled ?? DEFAULT_AUDIT_ENABLED);
     auditEnabled = askBool("Enable audit log?", prefilled);
   } else {
-    auditEnabled = auditFlag !== undefined ? parseOnOff(auditFlag, "--audit") : DEFAULT_AUDIT_ENABLED;
+    auditEnabled =
+      auditFlag !== undefined
+        ? parseOnOff(auditFlag, "--audit")
+        : (editDefaults?.audit?.enabled ?? DEFAULT_AUDIT_ENABLED);
   }
 
   const cfg: ConfigFile = {
     version: 1,
-    s3: { endpoint, region, bucket, accessKeyId, secretAccessKey, useSsl },
+    s3: {
+      endpoint: profile.endpoint,
+      region: profile.region,
+      bucket: profile.bucket,
+      accessKeyId: profile.accessKeyId,
+      secretAccessKey: profile.secretAccessKey,
+      useSsl,
+    },
     encryption: { salt: randomSalt() },
     ...(hasVaultOverride ? { files: { vaultFolder } } : {}),
     audit: { enabled: auditEnabled },
+    initProfile: profileName,
+    prefix,
   };
 
   const filePath = await saveConfigFile(repo, env, cfg);
   const key = generateKey();
   await setKey(repo, env, key);
-
-  // First-ever init writes defaults so subsequent inits pre-fill.
-  if (!existingDefaults) {
-    const defaults: Defaults = {
-      version: 1,
-      s3: { endpoint, region, bucket, accessKeyId, secretAccessKey, useSsl },
-    };
-    await saveDefaults(defaults);
-    console.log(`  defaults: wrote ${defaultsFilePath()}`);
-  }
 
   // Ensure the vault folder exists.
   const absVault = join(root, vaultFolder);
@@ -223,6 +400,8 @@ export async function main(argv: string[]): Promise<void> {
   console.log(
     `  key:         OS keychain (service=tools.vsync, account=${repo}/${env})`,
   );
+  console.log(`  profile:     ${profileName}`);
+  console.log(`  prefix:      ${prefix}`);
   console.log(`  vault:       ${absVault}\n`);
   console.log("In your app, point dotenv (or equivalent) at the vault:");
   console.log(`  dotenv.config({ path: \`${vaultFolder}/.env.\${env}\` });\n`);
@@ -261,7 +440,6 @@ async function maybeMigrate(
 
   let approved: boolean;
   if (!isTty()) {
-    // Non-interactive without --no-migrate → don't silently move user data.
     console.log(
       `  migrate: found ${sourceRel} but no TTY for confirmation; leaving in place. Pass --migrate-from=${sourceRel} interactively or move it manually.`,
     );

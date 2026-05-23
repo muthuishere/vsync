@@ -40,6 +40,10 @@ export type ConfigFile = {
   // (audit is on by default — see SPEC-v0.4 §9). Explicit `{ enabled: false }`
   // round-trips through save/load unchanged.
   audit?: { enabled: boolean };
+  /** Name of the profile init was bound to. v0.13+. Optional on old configs. */
+  initProfile?: string;
+  /** Resolved S3 prefix for this (repo, env). v0.13+. Optional on old configs. */
+  prefix?: string;
 };
 
 /** Per-(repo, env) audit preference, defaulted. Source of truth for callers. */
@@ -217,5 +221,11 @@ export function validateConfigFile(cfg: unknown): asserts cfg is ConfigFile {
     if (typeof c.audit.enabled !== "boolean") {
       throw new Error("config: audit.enabled must be a boolean");
     }
+  }
+  if (c.initProfile !== undefined && typeof c.initProfile !== "string") {
+    throw new Error("config: initProfile must be a string if present");
+  }
+  if (c.prefix !== undefined && typeof c.prefix !== "string") {
+    throw new Error("config: prefix must be a string if present");
   }
 }

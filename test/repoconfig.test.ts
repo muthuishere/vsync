@@ -258,6 +258,44 @@ describe("validateConfigFile", () => {
     const bad = { ...structuredClone(sample), audit: 42 } as any;
     expect(() => validateConfigFile(bad)).toThrow(/audit/);
   });
+
+  test("accepts initProfile string (v0.13)", () => {
+    const good = { ...structuredClone(sample), initProfile: "hetzner-personal" };
+    expect(() => validateConfigFile(good)).not.toThrow();
+  });
+
+  test("rejects initProfile if not a string", () => {
+    const bad = { ...structuredClone(sample), initProfile: 42 } as any;
+    expect(() => validateConfigFile(bad)).toThrow(/initProfile/);
+  });
+
+  test("accepts prefix string (v0.13)", () => {
+    const good = { ...structuredClone(sample), prefix: "video-ai/dev/" };
+    expect(() => validateConfigFile(good)).not.toThrow();
+  });
+
+  test("rejects prefix if not a string", () => {
+    const bad = { ...structuredClone(sample), prefix: 42 } as any;
+    expect(() => validateConfigFile(bad)).toThrow(/prefix/);
+  });
+});
+
+describe("v0.13 fields round-trip", () => {
+  beforeEach(() => {
+    rmSync(join(tmpRoot, "vsync"), { recursive: true, force: true });
+  });
+
+  test("initProfile + prefix round-trip", async () => {
+    const cfg: ConfigFile = {
+      ...sample,
+      initProfile: "hetzner-personal",
+      prefix: "video-ai/dev/",
+    };
+    await saveConfigFile("acme", "dev", cfg);
+    const loaded = await loadConfigFile("acme", "dev");
+    expect(loaded?.initProfile).toBe("hetzner-personal");
+    expect(loaded?.prefix).toBe("video-ai/dev/");
+  });
 });
 
 describe("new sync blocks round-trip (v0.8)", () => {

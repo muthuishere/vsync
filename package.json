@@ -1,6 +1,6 @@
 {
   "name": "@muthuishere/vsync",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "description": "Encrypted secret-sync CLI for small teams. AES-256-GCM vault on any S3-compatible bucket + OS keychain key + one-passphrase .share onboarding + fanout to GitHub Actions, GCP Secret Manager, AWS Secrets Manager, Azure Key Vault, HashiCorp Vault KV v2 + append-only audit log. Worktree-safe. Bun-native, run via bunx.",
   "type": "module",
   "bin": {
