@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -320,20 +319,20 @@ func TestConformanceFallbackChain(t *testing.T) {
 
 			for i, q := range queries {
 				want := results[i].(map[string]any)
-				gotVal, gotOK := c.Get(q)
+				gotVal, gotOK := c.GetEnv(q)
 				wantVal := want["value"]
 				if wantVal == nil {
 					if gotOK {
-						t.Fatalf("%s: Get(%q) = (%q, true), want (_, false)", v.Name, q, gotVal)
+						t.Fatalf("%s: GetEnv(%q) = (%q, true), want (_, false)", v.Name, q, gotVal)
 					}
 				} else if !gotOK || gotVal != wantVal.(string) {
-					t.Fatalf("%s: Get(%q) = (%q, %v), want %q", v.Name, q, gotVal, gotOK, wantVal)
+					t.Fatalf("%s: GetEnv(%q) = (%q, %v), want %q", v.Name, q, gotVal, gotOK, wantVal)
 				}
-				if string(c.Source(q)) != want["source"].(string) {
-					t.Fatalf("%s: Source(%q) = %s, want %s", v.Name, q, c.Source(q), want["source"])
+				if string(c.EnvSource(q)) != want["source"].(string) {
+					t.Fatalf("%s: EnvSource(%q) = %s, want %s", v.Name, q, c.EnvSource(q), want["source"])
 				}
-				if c.Has(q) != want["has"].(bool) {
-					t.Fatalf("%s: Has(%q) = %v, want %v", v.Name, q, c.Has(q), want["has"])
+				if c.HasEnv(q) != want["has"].(bool) {
+					t.Fatalf("%s: HasEnv(%q) = %v, want %v", v.Name, q, c.HasEnv(q), want["has"])
 				}
 			}
 		})
@@ -341,6 +340,9 @@ func TestConformanceFallbackChain(t *testing.T) {
 }
 
 func TestConformanceAssetPath(t *testing.T) {
+	// v0.12 §6: filesystem materialization dropped. The asset-path category
+	// is now an in-memory GetAsContent byte-equality check — mode_octal and
+	// on-disk asserts no longer apply.
 	root := corpusRoot(t)
 	for _, v := range loadCategory(t, root, "asset-path") {
 		v := v
@@ -351,40 +353,16 @@ func TestConformanceAssetPath(t *testing.T) {
 			in := v.inputs()
 			key, _ := in["key"].(string)
 			c := fromVaultForTest(nil, map[string][]byte{key: v.BinBytes}, nil, 0, "test")
+			defer c.Close()
 
-			gotBytes, err := c.AssetBytes(key)
+			gotBytes, err := c.GetAsContent(key)
 			if err != nil {
-				c.Close()
-				t.Fatalf("AssetBytes: %v", err)
+				t.Fatalf("GetAsContent: %v", err)
 			}
 			exp := v.Meta["expected"].(map[string]any)
 			wantHex, _ := exp["bytes_hex"].(string)
 			if got := hex.EncodeToString(gotBytes); got != wantHex {
-				c.Close()
-				t.Fatalf("AssetBytes hex mismatch: %s vs %s", got, wantHex)
-			}
-			path, err := c.AssetPath(key)
-			if err != nil {
-				c.Close()
-				t.Fatalf("AssetPath: %v", err)
-			}
-			data, _ := os.ReadFile(path)
-			if hex.EncodeToString(data) != wantHex {
-				c.Close()
-				t.Fatalf("on-disk bytes mismatch")
-			}
-			st, err := os.Stat(path)
-			if err != nil {
-				c.Close()
-				t.Fatalf("stat: %v", err)
-			}
-			if mode := st.Mode().Perm(); mode != 0o600 {
-				c.Close()
-				t.Fatalf("mode = %o, want 0o600", mode)
-			}
-			c.Close()
-			if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("tempfile should be unlinked after Close")
+				t.Fatalf("GetAsContent hex mismatch: %s vs %s", got, wantHex)
 			}
 		})
 	}

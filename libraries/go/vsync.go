@@ -67,6 +67,25 @@ func Open(ctx context.Context, opts ...Option) (*Client, error) {
 	return openWithBootstrap(ctx, cfgBlob, passphrase, opts...)
 }
 
+// OpenWith is the string-arg sibling of Open — accepts the VSYNC_CONFIG
+// blob and the passphrase directly instead of reading them from the
+// process environment (v0.12 §4.3, §4.5). Use this when the bootstrap
+// inputs live in a KMS, Hashicorp Vault, a CI variable, or any custom
+// secrets layer that isn't a platform-managed env-var injection.
+//
+// Empty config or empty passphrase → (nil, ErrConfigMissing). All other
+// behavior is identical to Open (same Client, same Fetcher, same
+// fallback chain, same redaction, same defaults).
+func OpenWith(ctx context.Context, config, passphrase string, opts ...Option) (*Client, error) {
+	if config == "" {
+		return nil, fmt.Errorf("%w: empty config", ErrConfigMissing)
+	}
+	if passphrase == "" {
+		return nil, fmt.Errorf("%w: empty passphrase", ErrConfigMissing)
+	}
+	return openWithBootstrap(ctx, []byte(config), passphrase, opts...)
+}
+
 // openWithBootstrap is the inner entry point that takes pre-resolved
 // bootstrap inputs. Tests can call this directly to avoid env-var
 // gymnastics in environments where Setenv is fiddly.

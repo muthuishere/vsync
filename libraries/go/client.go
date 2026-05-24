@@ -20,9 +20,10 @@ const (
 )
 
 // Client is the in-memory accessor for a decrypted vault. Construct via
-// Open(ctx, opts...). All accessors except AssetPath are pure-memory and
-// safe to call from any goroutine without coordination as long as the
-// vault is not concurrently being Closed.
+// Open(ctx, opts...) or OpenWith(ctx, cfg, passphrase, opts...). All
+// pure-memory accessors (GetEnv, HasEnv, EnvSource, GetAsContent,
+// Generation) are safe to call from any goroutine without coordination
+// as long as the vault is not concurrently being Closed.
 //
 // Redaction (v0.12 §12): String() / fmt.Stringer surfaces only the env
 // name and the generation counter. Vault values never appear in the
@@ -33,7 +34,6 @@ type Client struct {
 	defaults   map[string]string
 	generation int
 	env        string
-	materializ *assetMaterializer
 	closed     bool
 	// fetcher + cfg are retained from Open so RemoteGeneration /
 	// HasNewVersion can issue a fresh manifest read without re-resolving
@@ -43,10 +43,10 @@ type Client struct {
 	cfg     *Config
 }
 
-// Get resolves key through vault → env → defaults → missing (v0.12 §5).
+// GetEnv resolves key through vault → env → defaults → missing (v0.12 §5).
 // The second return is false when the key resolved to "missing" (or the
 // client is closed).
-func (c *Client) Get(key string) (string, bool) {
+func (c *Client) GetEnv(key string) (string, bool) {
 	if c.closed {
 		return "", false
 	}
@@ -64,8 +64,8 @@ func (c *Client) Get(key string) (string, bool) {
 	return "", false
 }
 
-// Has returns true iff vault, env, or defaults would resolve key.
-func (c *Client) Has(key string) bool {
+// HasEnv returns true iff vault, env, or defaults would resolve key.
+func (c *Client) HasEnv(key string) bool {
 	if c.closed {
 		return false
 	}
@@ -79,9 +79,9 @@ func (c *Client) Has(key string) bool {
 	return ok
 }
 
-// Source names the step in the fallback chain that wins (or
+// EnvSource names the step in the fallback chain that wins (or
 // SourceMissing). Never returns the value itself — safe to log.
-func (c *Client) Source(key string) Source {
+func (c *Client) EnvSource(key string) Source {
 	if c.closed {
 		return SourceMissing
 	}
@@ -97,13 +97,15 @@ func (c *Client) Source(key string) Source {
 	return SourceMissing
 }
 
-// AssetBytes returns the asset's raw bytes. Never touches the filesystem.
-// Preferred over AssetPath in new code (v0.12 §6).
+// GetAsContent returns the binary payload for name as raw bytes. Never
+// touches the filesystem (v0.12 §6). Callers who need a filesystem path
+// (GCP GOOGLE_APPLICATION_CREDENTIALS, OpenSSL cert file, JVM keystore)
+// must write the bytes to a tempfile themselves.
 //
-// Lookup order: assets map, then KV — the KV fallthrough exists so the
-// asset-path conformance vectors (where the test harness seeds the binary
-// asset into KV-as-string) round-trip cleanly.
-func (c *Client) AssetBytes(name string) ([]byte, error) {
+// Lookup order: assets map, then KV — the KV fallthrough exists so
+// conformance vectors that seed the binary value into KV-as-string
+// round-trip cleanly.
+func (c *Client) GetAsContent(name string) ([]byte, error) {
 	if c.closed {
 		return nil, fmt.Errorf("vsync: handle is closed")
 	}
@@ -117,28 +119,6 @@ func (c *Client) AssetBytes(name string) ([]byte, error) {
 		return []byte(v), nil
 	}
 	return nil, fmt.Errorf("vsync: asset %q not in vault", name)
-}
-
-// AssetPath lazily materializes the asset to a 0600 tempfile and returns
-// the path. The per-handle tempdir is created on first call and removed
-// by Close (v0.12 §6). Repeat calls with the same name return the cached
-// path without rewriting.
-//
-// SIGKILL does not run Close — the file may leak until next reboot
-// (tmpfs) or until a sweep. Documented in the README — we don't promise
-// more than the OS gives us.
-func (c *Client) AssetPath(name string) (string, error) {
-	if c.closed {
-		return "", fmt.Errorf("vsync: handle is closed")
-	}
-	bytes_, err := c.AssetBytes(name)
-	if err != nil {
-		return "", err
-	}
-	if c.materializ == nil {
-		c.materializ = &assetMaterializer{}
-	}
-	return c.materializ.materialize(name, bytes_)
 }
 
 // Generation returns the monotonic gen counter from the manifest meta
@@ -190,8 +170,7 @@ func (c *Client) HasNewVersion(ctx context.Context) (bool, error) {
 	return remote > int64(c.generation), nil
 }
 
-// Close releases the in-memory vault and removes any materialized tempfiles.
-// Idempotent. Best-effort: a SIGKILL'd process leaks tempfiles per §6.
+// Close releases the in-memory vault. Idempotent.
 func (c *Client) Close() error {
 	if c.closed {
 		return nil
@@ -205,10 +184,6 @@ func (c *Client) Close() error {
 	}
 	for k := range c.assets {
 		delete(c.assets, k)
-	}
-	if c.materializ != nil {
-		c.materializ.close()
-		c.materializ = nil
 	}
 	return nil
 }

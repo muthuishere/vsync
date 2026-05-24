@@ -46,13 +46,12 @@ func main() {
     if err != nil { log.Fatal(err) }
     defer v.Close()
 
-    dbURL, ok := v.Get("DATABASE_URL")     // (string, bool)
-    has := v.Has("STRIPE_KEY")             // bool
-    src := v.Source("DATABASE_URL")        // vsync.SourceVault | …Env | …Default | …Missing
-    bytes, err := v.AssetBytes("svc.json") // []byte, no filesystem
-    path, err := v.AssetPath("svc.json")   // string — lazy 0600 tempfile
-    gen := v.Generation()                  // int — monotonic counter, safe to log
-    _ = dbURL; _ = has; _ = src; _ = bytes; _ = path; _ = gen
+    dbURL, ok := v.GetEnv("DATABASE_URL")        // (string, bool)
+    has := v.HasEnv("STRIPE_KEY")                // bool
+    src := v.EnvSource("DATABASE_URL")           // vsync.SourceVault | …Env | …Default | …Missing
+    bytes, err := v.GetAsContent("svc.json")     // []byte, no filesystem
+    gen := v.Generation()                        // int — monotonic counter, safe to log
+    _ = dbURL; _ = has; _ = src; _ = bytes; _ = gen
 }
 ```
 
@@ -67,6 +66,22 @@ For tests or custom backends, swap the S3 fetcher:
 ```go
 v, err := vsync.Open(ctx, vsync.WithFetcher(myFakeFetcher))
 ```
+
+### `OpenWith` — string-arg bootstrap
+
+When the bootstrap inputs live in a KMS, Hashicorp Vault, a CI variable, or
+any custom secrets layer that isn't a platform-managed env-var injection,
+use `OpenWith` instead — same `*Client`, same options, but the config blob
+and passphrase come in as strings:
+
+```go
+cfg, _ := mySecretsLayer.Get(ctx, "vsync-config")
+pass, _ := mySecretsLayer.Get(ctx, "vsync-passphrase")
+v, err := vsync.OpenWith(ctx, cfg, pass, vsync.WithDefaults(map[string]string{"PORT": "8080"}))
+```
+
+Empty `config` or empty `passphrase` → `(nil, vsync.ErrConfigMissing)`. All
+other behavior is identical to `Open`.
 
 ## Two-input bootstrap
 
@@ -99,14 +114,14 @@ The library treats both shapes identically — pick one pattern per environment.
 
 ## Fallback chain
 
-`v.Get(key)` resolves in exactly this order. No reordering, no per-key overrides:
+`v.GetEnv(key)` resolves in exactly this order. No reordering, no per-key overrides:
 
-1. `vault[key]` — the decrypted bundle. `Source` = `SourceVault`.
-2. `os.Getenv(key)` — at lookup time, not at `Open` time. `Source` = `SourceEnv`.
-3. `defaults[key]` — the map passed via `WithDefaults`. `Source` = `SourceDefault`.
-4. missing — `Get` returns `("", false)`. `Source` = `SourceMissing`.
+1. `vault[key]` — the decrypted bundle. `EnvSource` = `SourceVault`.
+2. `os.Getenv(key)` — at lookup time, not at `Open` time. `EnvSource` = `SourceEnv`.
+3. `defaults[key]` — the map passed via `WithDefaults`. `EnvSource` = `SourceDefault`.
+4. missing — `GetEnv` returns `("", false)`. `EnvSource` = `SourceMissing`.
 
-`Has(key)` is true iff steps 1–3 resolve. `Source(key)` returns the label of the winning step **without** returning the value — safe to log.
+`HasEnv(key)` is true iff steps 1–3 resolve. `EnvSource(key)` returns the label of the winning step **without** returning the value — safe to log.
 
 ## Errors
 
@@ -133,13 +148,30 @@ if errors.Is(err, vsync.ErrWrongPassphrase) {
 
 The conformance corpus pins error class identity across languages — `CanonicalName(err)` maps a Go sentinel to the spec's canonical name (e.g. `"WrongPassphraseError"`).
 
-## Asset materialization
+## Binary assets
 
-`AssetBytes(name)` is the default — never touches the filesystem. `AssetPath(name)` lazily writes to a per-handle tempdir (mode 0700) and returns a 0600 path, for SDKs that demand a filesystem path (GCP `GOOGLE_APPLICATION_CREDENTIALS`, OpenSSL cert paths, etc.). On Linux, `/dev/shm` (tmpfs) is preferred. `Close` removes the dir. **SIGKILL does not run `Close`** — file may leak until reboot. Documented honestly.
+`v.GetAsContent(name)` returns the raw bytes for a binary payload — JSON
+keys, PEM certs, anything inlined via the CLI's `--inline-file-suffix`.
+Never touches the filesystem (v0.12 §6).
+
+If an SDK demands a filesystem path (GCP `GOOGLE_APPLICATION_CREDENTIALS`,
+OpenSSL cert paths, JVM keystores), materialize at the call site — three
+lines, no library machinery:
+
+```go
+bytes, _ := v.GetAsContent("gcp-sa.json")
+dir, _ := os.MkdirTemp("", "vsync-")
+path := filepath.Join(dir, "gcp-sa.json")
+os.WriteFile(path, bytes, 0o600)
+os.Setenv("GOOGLE_APPLICATION_CREDENTIALS", path)
+```
+
+The lib has no good defaults for tmpdir choice, mode bits, `/dev/shm`
+preference, or SIGKILL cleanup — the caller owns lifecycle and perms.
 
 ## Redaction
 
-`fmt.Sprint(v)` returns `<vsync:redacted gen=N env=<env>>`. Vault values never leak through `Stringer`. `Source(key)`, `Has(key)`, and `Generation()` are safe to log. `Get(key)` and `AssetBytes(name)` results are **never** safe to log.
+`fmt.Sprint(v)` returns `<vsync:redacted gen=N env=<env>>`. Vault values never leak through `Stringer`. `EnvSource(key)`, `HasEnv(key)`, and `Generation()` are safe to log. `GetEnv(key)` and `GetAsContent(name)` results are **never** safe to log.
 
 The library does not install panic handlers or filter logger output. Application-level observability hygiene is the caller's job.
 
@@ -202,13 +234,12 @@ VSYNC_TEST_VECTORS_DIR=/tmp/regenerated-vectors go test -run TestConformance ./.
 libraries/go/
 ├── go.mod
 ├── README.md                  (you are here)
-├── vsync.go                   public Open + functional options
-├── client.go                  Client handle + Get/Has/Source/AssetBytes/AssetPath/Generation/Close
+├── vsync.go                   public Open + OpenWith + functional options
+├── client.go                  Client handle + GetEnv/HasEnv/EnvSource/GetAsContent/Generation/Close
 ├── crypto.go                  RQE1 decrypt (+ structural floor heuristic)
 ├── manifest.go                RQEM0001 unwrap + pointer-seal verify
 ├── config_blob.go             VSYNC_CONFIG decode (magic / base64url / gzip / JSON)
 ├── sources.go                 two-input bootstrap resolution
-├── assetpath.go               lazy 0600 tempfile materialization
 ├── s3_fetcher.go              default aws-sdk-go-v2 fetcher
 ├── errors.go                  sentinel errors + CanonicalName
 ├── *_test.go                  per-file unit suites

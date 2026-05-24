@@ -89,10 +89,10 @@ func TestOpenSuccess(t *testing.T) {
 	if !f.called {
 		t.Errorf("fetcher should have been called")
 	}
-	if v, _ := c.Get("DATABASE_URL"); v != "postgres://from-vault" {
-		t.Errorf("vault Get failed: %q", v)
+	if v, _ := c.GetEnv("DATABASE_URL"); v != "postgres://from-vault" {
+		t.Errorf("vault GetEnv failed: %q", v)
 	}
-	if c.Source("DATABASE_URL") != SourceVault {
+	if c.EnvSource("DATABASE_URL") != SourceVault {
 		t.Errorf("source mismatch")
 	}
 	if c.Generation() != 5 {
@@ -168,10 +168,10 @@ func TestOpenAcceptsDefaults(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	defer c.Close()
-	if v, _ := c.Get("PORT"); v != "8080" {
+	if v, _ := c.GetEnv("PORT"); v != "8080" {
 		t.Errorf("default value not honored: %q", v)
 	}
-	if c.Source("PORT") != SourceDefault {
+	if c.EnvSource("PORT") != SourceDefault {
 		t.Errorf("source mismatch")
 	}
 }
