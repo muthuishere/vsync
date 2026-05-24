@@ -1,24 +1,20 @@
 package io.github.muthuishere.vsync.s3client.client;
 
-import io.github.muthuishere.vsync.s3client.assetpath.AssetMaterializer;
 import io.github.muthuishere.vsync.s3client.config.VsyncConfig;
 
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Optional;
 
 /**
  * In-memory accessor for a decrypted vault. Construct via
- * {@link VsyncClient#open()}; tests can construct directly via
- * {@link #fromVaultForTest} to bypass S3.
+ * {@link VsyncClient#open()} or {@link VsyncClient#openWith(String, String)};
+ * tests can construct directly via {@link #fromVaultForTest} to bypass S3.
  *
- * <p>All accessors except {@link #assetPath(String)} are pure-memory after
- * Open returns. The fallback chain (v0.12 §5) is locked: vault → process env
- * → defaults → missing. {@link #close()} zeroes the in-memory plaintext and
- * unlinks any per-handle tempfiles.
+ * <p>All accessors are pure-memory after Open returns. The fallback chain
+ * (v0.12 §5) is locked: vault → process env → defaults → missing.
+ * {@link #close()} zeroes the in-memory plaintext.
  *
  * <p>Redaction (v0.12 §12): {@link #toString()} returns
  * {@code "<vsync:redacted>"} — vault values never leak through accidental
@@ -40,7 +36,6 @@ public final class Vsync implements AutoCloseable {
      */
     private final S3Fetcher fetcher;
     private final VsyncConfig cfg;
-    private AssetMaterializer materializer;
     private boolean closed;
 
     Vsync(Map<String, String> kv,
@@ -59,25 +54,24 @@ public final class Vsync implements AutoCloseable {
         this.cfg = cfg;
     }
 
-    /** Resolve {@code key} through vault → env → defaults → missing. */
-    public Optional<String> get(String key) {
+    /** Resolve {@code key} through vault → env → defaults → missing. Returns {@code null} if missing. */
+    public String getEnv(String key) {
         ensureOpen();
         String fromVault = kv.get(key);
         if (fromVault != null) {
-            return Optional.of(fromVault);
+            return fromVault;
         }
         // os.getenv at lookup time, not Open time — process-env mutations
         // after open() are visible (v0.12 §5).
         String fromEnv = System.getenv(key);
         if (fromEnv != null) {
-            return Optional.of(fromEnv);
+            return fromEnv;
         }
-        String fromDefaults = defaults.get(key);
-        return fromDefaults != null ? Optional.of(fromDefaults) : Optional.empty();
+        return defaults.get(key);
     }
 
     /** True iff vault, env, or defaults would resolve {@code key}. */
-    public boolean has(String key) {
+    public boolean hasEnv(String key) {
         ensureOpen();
         return kv.containsKey(key)
                 || System.getenv(key) != null
@@ -85,7 +79,7 @@ public final class Vsync implements AutoCloseable {
     }
 
     /** Name the step in the fallback chain that wins (or {@link Source#MISSING}). */
-    public Source source(String key) {
+    public Source envSource(String key) {
         ensureOpen();
         if (kv.containsKey(key)) {
             return Source.VAULT;
@@ -100,12 +94,13 @@ public final class Vsync implements AutoCloseable {
     }
 
     /**
-     * Return the asset's bytes. Falls back to a KV lookup so the asset-path
-     * conformance corpus (where the binary blob is referenced via a KV
-     * placeholder and the harness seeds the bytes) round-trips cleanly.
-     * Mirrors the Python / Go / TS ports.
+     * Return the asset's bytes (v0.12 §6). In-memory only — no filesystem
+     * materialization. Falls back to a KV lookup so the asset conformance
+     * corpus (where the binary blob is referenced via a KV placeholder and
+     * the harness seeds the bytes) round-trips cleanly. Mirrors the
+     * Python / Go / TS ports.
      */
-    public byte[] assetBytes(String name) {
+    public byte[] getAsContent(String name) {
         ensureOpen();
         byte[] b = assets.get(name);
         if (b != null) {
@@ -119,20 +114,6 @@ public final class Vsync implements AutoCloseable {
             return v.getBytes(StandardCharsets.UTF_8);
         }
         throw new NoSuchElementException("vsync: asset " + name + " not in vault");
-    }
-
-    /**
-     * Lazily materialize the asset bytes to a 0600 tempfile inside this
-     * handle's 0700 tempdir (v0.12 §6). Repeated calls with the same name
-     * return the cached path. {@link #close()} unlinks the tempdir;
-     * SIGKILL → leak.
-     */
-    public Path assetPath(String name) {
-        ensureOpen();
-        if (materializer == null) {
-            materializer = new AssetMaterializer();
-        }
-        return materializer.materialize(name, assetBytes(name));
     }
 
     /** Monotonic gen counter from the manifest meta cell. Safe to log. */
@@ -195,17 +176,10 @@ public final class Vsync implements AutoCloseable {
         closed = true;
         kv.clear();
         assets.clear();
-        if (materializer != null) {
-            materializer.close();
-            materializer = null;
-        }
     }
 
     /**
      * Redaction-safe form (v0.12 §12). The handle never serializes the vault.
-     * The brief lists {@code "<vsync:redacted>"} as the canonical form —
-     * matches Go / TS. Python uses the more verbose form with gen+env; we
-     * stick with the brief.
      */
     @Override
     public String toString() {
@@ -221,7 +195,7 @@ public final class Vsync implements AutoCloseable {
     /**
      * Test hook — construct a {@code Vsync} with a pre-populated vault,
      * bypassing the S3 round trip. Production callers must use
-     * {@link VsyncClient#open()}.
+     * {@link VsyncClient#open()} / {@link VsyncClient#openWith}.
      *
      * <p>{@link #remoteGeneration} / {@link #hasNewVersion} on a handle
      * created this way raise {@link IllegalStateException} — there's no

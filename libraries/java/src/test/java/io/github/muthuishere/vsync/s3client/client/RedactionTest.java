@@ -13,9 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * v0.12 §12 redaction policy — the handle and VsyncConfig must NOT leak
  * vault values or credentials through any default serialization.
  *
- * <p>"Safe to log" surface: {@link Vsync#source}, {@link Vsync#has},
- * {@link Vsync#generation}. Everything else (get / assetBytes / assetPath
- * outcomes) is on the caller to keep out of their logger.
+ * <p>"Safe to log" surface: {@link Vsync#envSource}, {@link Vsync#hasEnv},
+ * {@link Vsync#generation}. Everything else (getEnv / getAsContent outcomes)
+ * is on the caller to keep out of their logger.
  */
 class RedactionTest {
 

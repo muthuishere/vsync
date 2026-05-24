@@ -43,27 +43,37 @@ import io.github.muthuishere.vsync.s3client.client.VsyncClient;
 import io.github.muthuishere.vsync.s3client.client.Source;
 
 try (Vsync v = VsyncClient.open()) {
-    String dbUrl = v.get("DATABASE_URL").orElse(null);          // Optional<String>
-    boolean hasStripe = v.has("STRIPE_KEY");                     // boolean
-    Source src = v.source("DATABASE_URL");                       // VAULT | ENV | DEFAULT | MISSING
-    java.nio.file.Path svc = v.assetPath("svc.json");            // lazy 0600 tempfile
-    byte[] svcBytes = v.assetBytes("svc.json");                  // bytes, no filesystem
+    String dbUrl = v.getEnv("DATABASE_URL");                     // null if missing
+    boolean hasStripe = v.hasEnv("STRIPE_KEY");                  // boolean
+    Source src = v.envSource("DATABASE_URL");                    // VAULT | ENV | DEFAULT | MISSING
+    byte[] svcBytes = v.getAsContent("svc.json");                // bytes, in-memory only
     long gen = v.generation();                                   // monotonic counter, safe to log
     long remote = v.remoteGeneration();                          // one manifest read, doesn't mutate local
     boolean stale = v.hasNewVersion();                           // remote > local
 }
 ```
 
-Defaults are seeded at `open()` time:
+Two open paths — `open()` reads `VSYNC_CONFIG` + `VSYNC_PASSPHRASE` from the process env; `openWith(config, passphrase)` accepts the strings directly (for callers whose config lives in a custom secrets store — KMS, Hashicorp Vault, a CI variable):
+
+```java
+try (Vsync v = VsyncClient.openWith(configBlob, passphrase)) {
+    String dbUrl = v.getEnv("DATABASE_URL");
+}
+```
+
+Both throw `ConfigMissingException` if a required input is null / empty. Defaults are seeded at open time:
 
 ```java
 import io.github.muthuishere.vsync.s3client.client.OpenOptions;
 import java.util.Map;
 
 Vsync v = VsyncClient.open(new OpenOptions().withDefaults(Map.of("PORT", "8080")));
+// or
+Vsync v2 = VsyncClient.openWith(configBlob, passphrase,
+        new OpenOptions().withDefaults(Map.of("PORT", "8080")));
 ```
 
-`Vsync` implements `AutoCloseable` — prefer try-with-resources so `close()` zeroes the in-memory plaintext and unlinks any per-handle tempfiles.
+`Vsync` implements `AutoCloseable` — prefer try-with-resources so `close()` zeroes the in-memory plaintext.
 
 ## Two-input bootstrap
 
@@ -97,14 +107,14 @@ The library treats both shapes identically — pick one pattern per environment.
 
 ## Fallback chain
 
-`v.get(key)` resolves in exactly this order. No reordering, no per-key overrides:
+`v.getEnv(key)` resolves in exactly this order. No reordering, no per-key overrides:
 
-1. `vault[env][key]` — the decrypted bundle. `source = VAULT`.
-2. `System.getenv(key)` — at lookup time, not at open. `source = ENV`.
-3. `defaults[key]` — the dict passed at `OpenOptions.withDefaults(...)`. `source = DEFAULT`.
-4. missing — returns `Optional.empty()`. `source = MISSING`.
+1. `vault[env][key]` — the decrypted bundle. `envSource = VAULT`.
+2. `System.getenv(key)` — at lookup time, not at open. `envSource = ENV`.
+3. `defaults[key]` — the dict passed at `OpenOptions.withDefaults(...)`. `envSource = DEFAULT`.
+4. missing — returns `null`. `envSource = MISSING`.
 
-`has(key)` is true iff steps 1–3 resolve. `source(key)` returns the label of the winning step **without** returning the value — safe to log.
+`hasEnv(key)` is true iff steps 1–3 resolve. `envSource(key)` returns the label of the winning step **without** returning the value — safe to log.
 
 ## Errors
 
@@ -124,13 +134,28 @@ Java idiom uses `Exception` as the suffix; the conformance corpus uses `Error` (
 
 `open()` does **not** silently degrade to env-vars-only when S3 is down — it raises `S3UnreachableException`. A process that booted with "env vars only because S3 was down" is harder to debug than one that refused to boot.
 
-## Asset materialization
+## Binary content
 
-`assetBytes(name)` is the default — never touches the filesystem. `assetPath(name)` lazily writes to a per-handle tempdir (mode 0700) and returns a 0600 path, for SDKs that demand a filesystem path (GCP `GOOGLE_APPLICATION_CREDENTIALS`, OpenSSL cert paths, etc.). On Linux, `/dev/shm` (tmpfs) is preferred. `close()` removes the dir. **SIGKILL does not run `close()`** — file may leak until reboot. Documented honestly.
+`getAsContent(name)` returns the bytes for an inlined binary blob (JSON keys, certs, etc., inlined via the CLI's `--inline-file-suffix`). In-memory only — the library does not materialize to disk.
+
+If an SDK demands a filesystem path (`GOOGLE_APPLICATION_CREDENTIALS`, OpenSSL cert paths, JVM keystores), write the bytes to a tempfile yourself:
+
+```java
+byte[] bytes = v.getAsContent("gcp-sa.json");
+Path dir = Files.createTempDirectory("vsync-");
+Path path = dir.resolve("gcp-sa.json");
+Files.write(path, bytes);
+Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-------"));
+System.setProperty("GOOGLE_APPLICATION_CREDENTIALS", path.toString());
+```
+
+The operator controls lifecycle (tempdir choice, mode bits, /dev/shm preference, cleanup on exit) rather than the library carrying that machinery forever.
 
 ## Redaction
 
 `Vsync.toString()` returns `"<vsync:redacted>"`. `VsyncConfig.toString()` redacts `accessKeyId`, `secretAccessKey`, and `salt` (non-secret fields like `endpoint`, `bucket`, `env`, `iterations` are kept — operators want to see them when debugging). Vault values never leak through serialization.
+
+`envSource(key)`, `hasEnv(key)`, and `generation()` are safe to log. `getEnv(key)` and `getAsContent(name)` results are **never** safe to log.
 
 The library does not install global panic handlers, monkey-patch `System.out`, or filter SLF4J appenders. Application-level observability hygiene is the caller's job.
 
@@ -174,7 +199,7 @@ The conformance corpus's `rqe1-decrypt-error/truncated-ciphertext` vector exerci
 
 ```bash
 cd libraries/java
-mvn test                                   # unit + conformance (112 tests)
+mvn test                                   # unit + conformance (121 tests)
 mvn -Dtest='ConformanceTest' test          # cross-language conformance only (33 tests)
 ```
 
@@ -211,11 +236,9 @@ libraries/java/
 │   │   └── VsyncConfig.java                           inner JSON shape
 │   ├── sources/
 │   │   └── BootstrapSources.java                      two-input bootstrap resolution
-│   ├── assetpath/
-│   │   └── AssetMaterializer.java                     lazy 0600 tempfile materialization
 │   ├── client/
 │   │   ├── Vsync.java                                 in-memory handle
-│   │   ├── VsyncClient.java                           public open()/openWithBootstrap()
+│   │   ├── VsyncClient.java                           public open()/openWith()/openWithBootstrap()
 │   │   ├── DefaultS3Fetcher.java                      AWS SDK v2 fetcher
 │   │   ├── S3Fetcher.java                             test injection seam
 │   │   ├── OpenOptions.java                           defaults + fetcher
@@ -235,9 +258,9 @@ libraries/java/
     ├── crypto/Rqem0001Test.java
     ├── config/ConfigBlobTest.java
     ├── sources/BootstrapSourcesTest.java
-    ├── assetpath/AssetMaterializerTest.java
     ├── client/VsyncTest.java
     ├── client/VsyncClientTest.java
+    ├── client/GetAsContentTest.java
     ├── client/RedactionTest.java
     ├── exceptions/ExceptionsTest.java
     └── conformance/

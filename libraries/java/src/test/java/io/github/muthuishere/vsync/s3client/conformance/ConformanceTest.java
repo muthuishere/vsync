@@ -24,16 +24,12 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.attribute.PosixFileAttributes;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.zip.GZIPOutputStream;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -239,9 +235,9 @@ class ConformanceTest {
                     // JVM already has the key — exercise Vsync normally.
                     try (Vsync handle = Vsync.fromVaultForTest(
                             probeVault, null, probeDefaults, 0, "test")) {
-                        actualSource = handle.source(key);
-                        actualValue = handle.get(key).orElse(null);
-                        actualHas = handle.has(key);
+                        actualSource = handle.envSource(key);
+                        actualValue = handle.getEnv(key);
+                        actualHas = handle.hasEnv(key);
                     }
                 } else {
                     // Simulate the env-hit by promoting the synthetic env entry to
@@ -256,9 +252,9 @@ class ConformanceTest {
             } else {
                 try (Vsync handle = Vsync.fromVaultForTest(
                         probeVault, null, probeDefaults, 0, "test")) {
-                    actualSource = handle.source(key);
-                    actualValue = handle.get(key).orElse(null);
-                    actualHas = handle.has(key);
+                    actualSource = handle.envSource(key);
+                    actualValue = handle.getEnv(key);
+                    actualHas = handle.hasEnv(key);
                 }
                 // The corpus's vault-hit / default-hit / missing cases also
                 // sometimes seed a synthetic env value. If System.getenv
@@ -285,43 +281,18 @@ class ConformanceTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("assetPathVectors")
-    void assetPath(Vector v) throws Exception {
+    void assetPath(Vector v) {
+        // v0.12 §6: getAsContent is bytes-only. The corpus name "asset-path"
+        // is historical; we only assert byte-equality and drop the mode-bit
+        // / file-existence checks. Matches the Python / Go / TS ports.
         assertNotNull(v.binBytes(), v + ": .bin required");
         String key = v.inputs().get("key").asText();
         try (Vsync handle = Vsync.fromVaultForTest(
                 null, Map.of(key, v.binBytes()), null, 0, "test")) {
-            byte[] bytes = handle.assetBytes(key);
+            byte[] bytes = handle.getAsContent(key);
             assertEquals(v.expected().get("bytes_hex").asText(), hex(bytes),
-                    v + ": assetBytes mismatch");
-            Path path = handle.assetPath(key);
-            assertArrayEquals(v.binBytes(), Files.readAllBytes(path),
-                    v + ": on-disk bytes mismatch");
-            // Mode check: corpus pins "0600". On POSIX filesystems verify;
-            // skip on Windows.
-            if (java.nio.file.FileSystems.getDefault()
-                    .supportedFileAttributeViews().contains("posix")) {
-                var attrs = Files.readAttributes(path, PosixFileAttributes.class);
-                int mode = toOctal(attrs.permissions());
-                assertEquals(0600, mode, v + ": mode " + Integer.toOctalString(mode));
-            }
-            handle.close();
-            assertFalse(Files.exists(path),
-                    v + ": tempfile should be unlinked after close()");
+                    v + ": getAsContent mismatch");
         }
-    }
-
-    private static int toOctal(java.util.Set<java.nio.file.attribute.PosixFilePermission> perms) {
-        int mode = 0;
-        if (perms.contains(java.nio.file.attribute.PosixFilePermission.OWNER_READ))    mode |= 0400;
-        if (perms.contains(java.nio.file.attribute.PosixFilePermission.OWNER_WRITE))   mode |= 0200;
-        if (perms.contains(java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE)) mode |= 0100;
-        if (perms.contains(java.nio.file.attribute.PosixFilePermission.GROUP_READ))    mode |= 040;
-        if (perms.contains(java.nio.file.attribute.PosixFilePermission.GROUP_WRITE))   mode |= 020;
-        if (perms.contains(java.nio.file.attribute.PosixFilePermission.GROUP_EXECUTE)) mode |= 010;
-        if (perms.contains(java.nio.file.attribute.PosixFilePermission.OTHERS_READ))   mode |= 04;
-        if (perms.contains(java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE))  mode |= 02;
-        if (perms.contains(java.nio.file.attribute.PosixFilePermission.OTHERS_EXECUTE)) mode |= 01;
-        return mode;
     }
 
     // ─── error-taxonomy ─────────────────────────────────────────────────

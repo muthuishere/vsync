@@ -8,6 +8,7 @@ import io.github.muthuishere.vsync.s3client.config.VsyncConfig;
 import io.github.muthuishere.vsync.s3client.crypto.Rqe1;
 import io.github.muthuishere.vsync.s3client.crypto.Rqem0001;
 import io.github.muthuishere.vsync.s3client.exceptions.BundleCorruptException;
+import io.github.muthuishere.vsync.s3client.exceptions.ConfigMissingException;
 import io.github.muthuishere.vsync.s3client.exceptions.S3UnreachableException;
 import io.github.muthuishere.vsync.s3client.exceptions.VSyncException;
 import io.github.muthuishere.vsync.s3client.sources.BootstrapSources;
@@ -46,6 +47,35 @@ public final class VsyncClient {
     public static Vsync open(OpenOptions opts) {
         BootstrapSources.Resolved bootstrap = BootstrapSources.resolve();
         return openWithBootstrap(bootstrap.configBlob(), bootstrap.passphrase(),
+                opts == null ? new OpenOptions() : opts);
+    }
+
+    /**
+     * Open with the bootstrap inputs supplied as strings (v0.12 §4.4). The
+     * counterpart to {@link #open()} for callers whose config lives in a
+     * custom secrets store (KMS, Hashicorp Vault, a CI variable) instead of
+     * a process env var. Behavioral parity with {@code open()} from then on.
+     *
+     * @param config the {@code vsync-cfg-v1:<base64url-gzip-json>} blob
+     * @param passphrase the RQE1 passphrase
+     * @throws ConfigMissingException if either argument is null or empty
+     */
+    public static Vsync openWith(String config, String passphrase) {
+        return openWith(config, passphrase, new OpenOptions());
+    }
+
+    public static Vsync openWith(String config, String passphrase, OpenOptions opts) {
+        if (config == null || config.isEmpty()) {
+            throw new ConfigMissingException(
+                    "vsync: openWith(config, ...) — config must be non-empty (v0.12 §2)");
+        }
+        if (passphrase == null || passphrase.isEmpty()) {
+            throw new ConfigMissingException(
+                    "vsync: openWith(..., passphrase) — passphrase must be non-empty (v0.12 §2)");
+        }
+        return openWithBootstrap(
+                config.getBytes(StandardCharsets.UTF_8),
+                passphrase,
                 opts == null ? new OpenOptions() : opts);
     }
 

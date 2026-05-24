@@ -11,8 +11,10 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.Map;
 import java.util.zip.GZIPOutputStream;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -56,7 +58,6 @@ class VsyncClientTest {
     @Test
     void openWithBootstrapEndToEnd() throws Exception {
         byte[] configBlob = mintConfigBlob();
-        // Encrypt a flat-vault payload with the SAME salt the blob declares.
         byte[] vault = "{\"DATABASE_URL\":\"postgres://round-trip\"}".getBytes();
         byte[] bundle = Rqe1.encryptForTest(vault, PASSPHRASE, SALT, ITER);
         byte[] manifestBytes = manifest("20260101-120000");
@@ -66,8 +67,8 @@ class VsyncClientTest {
 
         try (Vsync v = VsyncClient.openWithBootstrap(configBlob, PASSPHRASE,
                 new OpenOptions().withFetcher(fakeFetcher))) {
-            assertEquals("postgres://round-trip", v.get("DATABASE_URL").orElseThrow());
-            assertEquals(Source.VAULT, v.source("DATABASE_URL"));
+            assertEquals("postgres://round-trip", v.getEnv("DATABASE_URL"));
+            assertEquals(Source.VAULT, v.envSource("DATABASE_URL"));
             assertEquals(7, v.generation());
             assertEquals("prod", v.env());
         }
@@ -121,10 +122,90 @@ class VsyncClientTest {
 
     @Test
     void openWithMissingBootstrapThrowsConfigMissing() {
-        // Empty bootstrap inputs surface as ConfigMissingException from the
-        // public open() path. We can't easily wipe System.getenv() in-process,
-        // so test the deeper layer (decode of an empty blob).
         assertThrows(ConfigMissingException.class,
                 () -> VsyncClient.openWithBootstrap(new byte[0], "pp", new OpenOptions()));
+    }
+
+    // ─── openWith(config, passphrase) — v0.12 §4.4 ──────────────────────
+
+    @Test
+    void openWithAcceptsStringConfigAndPassphrase() throws Exception {
+        // The public openWith() accepts the gzipped+base64url config blob as
+        // a String (the same on-the-wire shape as VSYNC_CONFIG) plus a
+        // passphrase. We need a fetcher seam to avoid touching real S3, so we
+        // route through openWithBootstrap with byte-form inputs — same code
+        // path the String form would call internally.
+        byte[] configBlob = mintConfigBlob();
+        String configStr = new String(configBlob, StandardCharsets.US_ASCII);
+        byte[] bundle = Rqe1.encryptForTest(
+                "{\"DATABASE_URL\":\"postgres://from-openwith\"}".getBytes(),
+                PASSPHRASE, SALT, ITER);
+        S3Fetcher fake = cfg -> new S3Fetcher.Fetched(manifest("20260101-120000"), bundle, 9);
+
+        try (Vsync v = VsyncClient.openWith(configStr, PASSPHRASE,
+                new OpenOptions().withFetcher(fake))) {
+            assertEquals("postgres://from-openwith", v.getEnv("DATABASE_URL"));
+            assertEquals(9, v.generation());
+        }
+    }
+
+    @Test
+    void openWithThrowsConfigMissingOnEmptyConfig() {
+        assertThrows(ConfigMissingException.class,
+                () -> VsyncClient.openWith("", PASSPHRASE));
+        assertThrows(ConfigMissingException.class,
+                () -> VsyncClient.openWith(null, PASSPHRASE));
+    }
+
+    @Test
+    void openWithThrowsConfigMissingOnEmptyPassphrase() {
+        assertThrows(ConfigMissingException.class,
+                () -> VsyncClient.openWith("vsync-cfg-v1:xxx", ""));
+        assertThrows(ConfigMissingException.class,
+                () -> VsyncClient.openWith("vsync-cfg-v1:xxx", null));
+    }
+
+    @Test
+    void openWithThreadsDefaultsToHandle() throws Exception {
+        byte[] configBlob = mintConfigBlob();
+        String configStr = new String(configBlob, StandardCharsets.US_ASCII);
+        byte[] bundle = Rqe1.encryptForTest(
+                "{}".getBytes(), PASSPHRASE, SALT, ITER);
+        S3Fetcher fake = cfg -> new S3Fetcher.Fetched(manifest("20260101-120000"), bundle, 1);
+
+        try (Vsync v = VsyncClient.openWith(configStr, PASSPHRASE,
+                new OpenOptions()
+                        .withFetcher(fake)
+                        .withDefaults(Map.of("PORT", "8080")))) {
+            assertEquals("8080", v.getEnv("PORT"));
+            assertEquals(Source.DEFAULT, v.envSource("PORT"));
+        }
+    }
+
+    @Test
+    void openWithYieldsByteIdenticalDecryptionAsOpenForSameInputs() throws Exception {
+        // Both paths converge on openWithBootstrap, so byte-equality is the
+        // simplest invariant to pin: the bundle decrypted via openWith ==
+        // the bundle decrypted via openWithBootstrap, for the same inputs.
+        byte[] configBlob = mintConfigBlob();
+        String configStr = new String(configBlob, StandardCharsets.US_ASCII);
+        String secret = "{\"DATABASE_URL\":\"postgres://parity\",\"K\":\"VV\"}";
+        byte[] bundle = Rqe1.encryptForTest(secret.getBytes(), PASSPHRASE, SALT, ITER);
+        S3Fetcher fake = cfg -> new S3Fetcher.Fetched(manifest("20260101-120000"), bundle, 3);
+
+        try (Vsync a = VsyncClient.openWith(configStr, PASSPHRASE,
+                     new OpenOptions().withFetcher(fake));
+             Vsync b = VsyncClient.openWithBootstrap(configBlob, PASSPHRASE,
+                     new OpenOptions().withFetcher(fake))) {
+            assertEquals(a.getEnv("DATABASE_URL"), b.getEnv("DATABASE_URL"));
+            assertEquals(a.getEnv("K"), b.getEnv("K"));
+            assertEquals(a.generation(), b.generation());
+            assertEquals(a.env(), b.env());
+            // Byte-identical asset path: same vault → same bytes for any key
+            // present (none here, but the contract should still hold).
+            assertArrayEquals(
+                    a.getEnv("DATABASE_URL").getBytes(StandardCharsets.UTF_8),
+                    b.getEnv("DATABASE_URL").getBytes(StandardCharsets.UTF_8));
+        }
     }
 }
