@@ -1,0 +1,47 @@
+{
+  "name": "@muthuishere/vsync-s3-client",
+  "version": "0.1.0",
+  "description": "Read-side runtime library for the vsync ecosystem. Reads VSYNC_CONFIG + VSYNC_PASSPHRASE, fetches the manifest+bundle from S3, decrypts in-memory, exposes a get/has/source accessor with a deterministic fallback chain.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "keywords": [
+    "vsync",
+    "secrets",
+    "s3",
+    "runtime",
+    "pbkdf2",
+    "aes-gcm",
+    "config"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.658.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.1.0"
+  }
+}
