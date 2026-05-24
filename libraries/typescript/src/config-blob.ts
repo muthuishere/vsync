@@ -128,6 +128,17 @@ export function decodeConfigBlob(blob: Uint8Array | string): VsyncConfig {
       );
     }
   }
+  // Salt length sanity. The on-disk salts the CLI mints are 24 chars
+  // (base64url-no-pad of 18 random bytes); anything < 16 chars is either
+  // a hand-rolled blob with a too-short salt or a wire format we don't
+  // understand. Per Convention A locked in v0.12 §2.1 — the floor is on
+  // the STRING length (utf-8 bytes fed to PBKDF2), not on a decoded
+  // byte count.
+  if ((o.salt as string).length < 16) {
+    throw new ConfigUnsupportedVersionError(
+      `VSYNC_CONFIG: salt too short (${(o.salt as string).length} chars; need ≥ 16). The CLI mints 24-char salts; a shorter value suggests an older blob or hand-rolled config.`,
+    );
+  }
   if (
     typeof o.iterations !== "number" ||
     !Number.isInteger(o.iterations) ||

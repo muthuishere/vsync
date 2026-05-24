@@ -100,6 +100,19 @@ describe("decodeConfigBlob — ConfigUnsupportedVersionError", () => {
     }
     expect(() => decodeConfigBlob(BLOB_MAGIC + std)).toThrow(ConfigUnsupportedVersionError);
   });
+
+  test("salt shorter than 16 chars → ConfigUnsupportedVersionError (Convention A floor)", () => {
+    const inner = { ...SAMPLE, salt: "shortsalt" };
+    expect(() => decodeConfigBlob(mintBlob(inner))).toThrow(ConfigUnsupportedVersionError);
+    expect(() => decodeConfigBlob(mintBlob(inner))).toThrow(/salt too short|>= 16|≥ 16/);
+  });
+
+  test("salt exactly 16 chars passes (boundary)", () => {
+    const inner = { ...SAMPLE, salt: "0123456789ABCDEF" };
+    expect(inner.salt.length).toBe(16);
+    const cfg = decodeConfigBlob(mintBlob(inner));
+    expect(cfg.salt).toBe("0123456789ABCDEF");
+  });
 });
 
 describe("decodeConfigBlob — BundleCorruptError", () => {
