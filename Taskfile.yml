@@ -25,6 +25,9 @@ includes:
   go:
     taskfile: ./libraries/go/Taskfile.yml
     dir: ./libraries/go
+  java:
+    taskfile: ./libraries/java/Taskfile.yml
+    dir: ./libraries/java
 
 tasks:
   default:
@@ -39,12 +42,13 @@ tasks:
       - bun test
 
   test:all:
-    desc: Run every test suite — CLI + Python + TypeScript + Go
+    desc: Run every test suite — CLI + Python + TypeScript + Go + Java
     cmds:
       - task: test:cli
       - task: python:test
       - task: ts:test
       - task: go:test
+      - task: java:test
 
   check:version:
     desc: Verify the unified version is consistent across all packages
@@ -55,12 +59,14 @@ tasks:
         CLI=$(jq -r .version package.json)
         TS=$(jq -r .version libraries/typescript/package.json)
         PY=$(grep -E '^version = ' libraries/python/pyproject.toml | sed 's/.*"\(.*\)".*/\1/')
-        if [ "$CLI" != "$EXPECTED" ] || [ "$TS" != "$EXPECTED" ] || [ "$PY" != "$EXPECTED" ]; then
+        JAVA=$(grep -m1 -E '<version>.*</version>' libraries/java/pom.xml | sed -E 's/.*<version>(.*)<\/version>.*/\1/' | tr -d ' ')
+        if [ "$CLI" != "$EXPECTED" ] || [ "$TS" != "$EXPECTED" ] || [ "$PY" != "$EXPECTED" ] || [ "$JAVA" != "$EXPECTED" ]; then
           echo "✘ version drift detected:"
           echo "  expected: $EXPECTED"
           echo "  CLI:      $CLI"
           echo "  TS:       $TS"
           echo "  Python:   $PY"
+          echo "  Java:     $JAVA"
           exit 1
         fi
         echo "✓ all packages at $EXPECTED"
@@ -89,11 +95,12 @@ tasks:
       - bun publish --access=public
 
   publish:all:
-    desc: Publish CLI + Python + TS + tag-push Go. Run after `task tag:release` + `git push --tags`.
+    desc: Publish CLI + Python + TS + Java + tag-push Go. Run after `task tag:release` + `git push --tags`.
     cmds:
       - task: publish:cli
       - task: python:publish
       - task: ts:publish
+      - task: java:publish
       - 'echo "Go module is resolved from the git tag; ensure libraries/go/v{{.VERSION}} has been pushed."'
 
   clean:all:
@@ -102,3 +109,4 @@ tasks:
       - task: python:clean
       - task: ts:clean
       - task: go:clean
+      - task: java:clean
