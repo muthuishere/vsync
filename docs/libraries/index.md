@@ -243,6 +243,68 @@ Or run everything at once from repo root: `task test:all`.
 
 If you want live-reload, the right place to implement it is **one layer up** — a sidecar that touches a file → app watches the file → exits → orchestrator restarts. Not inside this library.
 
+### Checking whether a newer version exists — `has_new_version`
+
+Restart-only doesn't mean blind. Each lib exposes a lightweight **explicit-poll** method so a `/healthz` endpoint or sidecar cron can check whether the in-process bundle is stale, without the lib doing anything automatic about it:
+
+```python
+# Python
+v.generation()             # int — gen captured at open time, never mutated by polling
+v.remote_generation()      # int — single HEAD on the manifest, raises on network failure
+v.has_new_version()        # bool — convenience: remote > local
+```
+
+```typescript
+// TypeScript
+v.generation()                     // number
+await v.remoteGeneration()         // number
+await v.hasNewVersion()            // boolean
+```
+
+```go
+// Go
+v.Generation()                      // int
+v.RemoteGeneration(ctx)             // (int64, error)
+v.HasNewVersion(ctx)                // (bool, error)
+```
+
+```java
+// Java
+v.generation()                      // long
+v.remoteGeneration()                // long
+v.hasNewVersion()                   // boolean
+```
+
+**One HEAD per call. No background thread, no callbacks, no state mutation.** The local `generation()` stays whatever `open()` captured — polling never changes it. Errors propagate (`S3UnreachableError` / `ManifestNotFoundError`); most apps treat "unknown" as "don't restart for now."
+
+Typical pattern — a `/healthz` endpoint that reports staleness so the orchestrator (or a human) can decide whether to roll:
+
+```python
+@app.get("/healthz")
+def healthz():
+    try:
+        if v.has_new_version():
+            return {
+                "status": "stale",
+                "local_gen": v.generation(),
+                "remote_gen": v.remote_generation(),
+            }, 200
+        return {"status": "fresh", "gen": v.generation()}, 200
+    except S3UnreachableError:
+        # Network blip — don't trigger a restart on transient failure
+        return {"status": "unknown", "gen": v.generation()}, 200
+```
+
+Or a sidecar cron that polls every few minutes and signals the orchestrator:
+
+```python
+# Cron-scheduled
+if v.has_new_version():
+    requests.post("http://orchestrator/restart-when-idle", json={"reason": "vault rotated"})
+```
+
+The library tells you the **answer to a question**. It never changes the bundle in memory. Restart is still the only way to actually pick up new secrets.
+
 ## Where to go next
 
 - **Mint your first bootstrap blob:** [Runtime tokens](/guide/runtime-token)
