@@ -1,0 +1,101 @@
+version: '3'
+
+# Taskfile for libraries/python/ — vsync-s3-client Python lib
+#
+# Toolchain: uv (fast Python package manager). Install: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+# Falls back to `python -m build` + twine if uv isn't available.
+#
+# Auth for publish: set UV_PUBLISH_TOKEN env var (PyPI API token) before running `task publish`.
+
+vars:
+  VERSION: "0.11.0"
+  PACKAGE: "vsync-s3-client"
+
+tasks:
+  default:
+    desc: List Python lib tasks
+    cmds:
+      - task -l --sort=alphanumeric
+    silent: true
+
+  test:
+    desc: Run pytest suite (unit + conformance)
+    cmds:
+      - |
+        if command -v uv >/dev/null 2>&1; then
+          uv run pytest -v
+        else
+          python -m pytest -v
+        fi
+
+  test:conformance:
+    desc: Run only the cross-language conformance suite
+    cmds:
+      - |
+        if command -v uv >/dev/null 2>&1; then
+          uv run pytest tests/conformance/ -v
+        else
+          python -m pytest tests/conformance/ -v
+        fi
+
+  clean:
+    desc: Remove dist/, build/, egg-info, __pycache__
+    cmds:
+      - rm -rf dist build *.egg-info src/*.egg-info
+      - find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+      - find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+
+  build:
+    desc: Build sdist + wheel into dist/
+    deps: [clean]
+    cmds:
+      - |
+        if command -v uv >/dev/null 2>&1; then
+          uv build
+        else
+          python -m build
+        fi
+      - ls -la dist/
+
+  check:
+    desc: Verify the built artefacts look right (file naming, version pinning)
+    deps: [build]
+    silent: true
+    cmds:
+      - |
+        WHEEL=$(ls dist/*.whl 2>/dev/null | head -1)
+        SDIST=$(ls dist/*.tar.gz 2>/dev/null | head -1)
+        if [ -z "$WHEEL" ] || [ -z "$SDIST" ]; then
+          echo "✘ missing wheel or sdist in dist/"
+          exit 1
+        fi
+        echo "✓ wheel:  $WHEEL"
+        echo "✓ sdist:  $SDIST"
+        if ! echo "$WHEEL" | grep -q "{{.VERSION}}"; then
+          echo "✘ wheel name doesn't match version {{.VERSION}}: $WHEEL"
+          exit 1
+        fi
+        echo "✓ version {{.VERSION}} confirmed"
+
+  publish:
+    desc: Publish {{.PACKAGE}}=={{.VERSION}} to PyPI (requires UV_PUBLISH_TOKEN or .pypirc)
+    deps: [test, build, check]
+    cmds:
+      - 'echo "Publishing {{.PACKAGE}}=={{.VERSION}} to PyPI..."'
+      - |
+        if command -v uv >/dev/null 2>&1; then
+          uv publish
+        else
+          python -m twine upload dist/*
+        fi
+
+  publish:dry-run:
+    desc: Validate the package without uploading (TestPyPI)
+    deps: [test, build, check]
+    cmds:
+      - |
+        if command -v uv >/dev/null 2>&1; then
+          uv publish --publish-url https://test.pypi.org/legacy/
+        else
+          python -m twine upload --repository testpypi dist/*
+        fi

@@ -1,0 +1,83 @@
+version: '3'
+
+# Taskfile for libraries/go/ — vsync-s3-client-go
+#
+# Go modules don't have a separate "publish" step — they're resolved
+# directly from git tags. The `tag-and-push` task creates the subpath
+# tag (`libraries/go/v$VERSION`) required for go-get to find this
+# module under `github.com/muthuishere/vsync/libraries/go`.
+
+vars:
+  VERSION: "0.11.0"
+  MODULE: "github.com/muthuishere/vsync/libraries/go"
+  TAG: "libraries/go/v{{.VERSION}}"
+
+tasks:
+  default:
+    desc: List Go lib tasks
+    cmds:
+      - task -l --sort=alphanumeric
+    silent: true
+
+  test:
+    desc: Run `go test ./...`
+    cmds:
+      - go test ./...
+
+  test:verbose:
+    desc: Run go test with -v -race
+    cmds:
+      - go test -v -race ./...
+
+  test:conformance:
+    desc: Run only the conformance suite
+    cmds:
+      - go test -v -run TestConformance ./...
+
+  vet:
+    desc: Run `go vet ./...`
+    cmds:
+      - go vet ./...
+
+  tidy:
+    desc: Run `go mod tidy`
+    cmds:
+      - go mod tidy
+
+  clean:
+    desc: Remove go test cache
+    cmds:
+      - go clean -testcache
+
+  check:
+    desc: Verify the README + go.mod versions are consistent
+    silent: true
+    cmds:
+      - |
+        if ! grep -q "{{.VERSION}}" README.md; then
+          echo "✘ README.md does not reference {{.VERSION}}"
+          exit 1
+        fi
+        echo "✓ README mentions {{.VERSION}}"
+
+  tag-and-push:
+    desc: Create + push the Go-module subpath tag {{.TAG}} (run from repo root via `task go:tag-and-push`)
+    deps: [test, vet, check]
+    dir: ../..  # repo root for git operations
+    cmds:
+      - |
+        if git rev-parse {{.TAG}} >/dev/null 2>&1; then
+          echo "✘ tag {{.TAG}} already exists"
+          exit 1
+        fi
+      - git tag -a {{.TAG}} -m "vsync-s3-client-go v{{.VERSION}}"
+      - 'echo "✓ Created tag {{.TAG}}. Run \`git push origin {{.TAG}}\` to publish."'
+
+  verify:install:
+    desc: Verify the published tag is resolvable via `go get` (run from a temp dir)
+    cmds:
+      - |
+        TMP=$(mktemp -d)
+        cd "$TMP" && go mod init verify && go get {{.MODULE}}@v{{.VERSION}}
+        echo "✓ {{.MODULE}}@v{{.VERSION}} resolves"
+        rm -rf "$TMP"
