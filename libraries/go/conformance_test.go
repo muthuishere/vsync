@@ -440,8 +440,7 @@ func TestConformanceErrorTaxonomy(t *testing.T) {
 // fetcher-error branch.
 func ranOpen(t *testing.T, v vector, f *fakeFetcher) {
 	t.Helper()
-	salt := []byte("AAAAAAAAAAAAAAAA")
-	cfgBlob := makeConfigBlobForTest(t, salt, 600_000)
+	cfgBlob := makeConfigBlobForTest(t, "AAAAAAAAAAAAAAAA", 600_000)
 	t.Setenv("VSYNC_CONFIG", string(cfgBlob))
 	t.Setenv("VSYNC_PASSPHRASE", "pp")
 	_, err := Open(context.Background(), WithFetcher(f))

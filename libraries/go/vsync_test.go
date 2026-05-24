@@ -2,7 +2,6 @@ package vsync
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -25,7 +24,11 @@ func (f *fakeFetcher) Fetch(ctx context.Context, cfg *Config) (manifest []byte, 
 	return f.manifest, f.bundle, f.gen, f.err
 }
 
-func makeConfigBlobForTest(t *testing.T, salt []byte, iterations int) []byte {
+// makeConfigBlobForTest mints a blob that carries `saltString` verbatim
+// (Convention A — the runtime feeds these UTF-8 bytes to PBKDF2 with no
+// base64-decode). saltString must be ≥ configMinSaltChars to clear the
+// sanity floor in DecodeConfigBlob.
+func makeConfigBlobForTest(t *testing.T, saltString string, iterations int) []byte {
 	t.Helper()
 	inner := map[string]any{
 		"v":               1,
@@ -36,7 +39,7 @@ func makeConfigBlobForTest(t *testing.T, salt []byte, iterations int) []byte {
 		"secretAccessKey": "s",
 		"prefix":          "p/",
 		"env":             "test",
-		"salt":            base64.StdEncoding.EncodeToString(salt),
+		"salt":            saltString,
 		"iterations":      iterations,
 	}
 	return buildConfigBlob(t, inner)
@@ -46,10 +49,10 @@ func TestOpenSuccess(t *testing.T) {
 	t.Setenv("VSYNC_CONFIG", "")
 	t.Setenv("VSYNC_PASSPHRASE", "")
 
-	salt := []byte("AAAAAAAAAAAAAAAA") // 16 bytes
+	salt := "AAAAAAAAAAAAAAAA" // 16 chars — clears the configMinSaltChars floor
 	passphrase := "passphrase"
 	plaintext := []byte(`{"DATABASE_URL": "postgres://from-vault"}`)
-	bundle, err := encryptRQE1ForTestRawSalt(plaintext, passphrase, salt, 600_000)
+	bundle, err := encryptRQE1ForTest(plaintext, passphrase, salt, 600_000)
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
@@ -91,8 +94,7 @@ func TestOpenMissingEnvSurfacesConfigMissing(t *testing.T) {
 }
 
 func TestOpenS3FetchErrorPropagates(t *testing.T) {
-	salt := []byte("AAAAAAAAAAAAAAAA")
-	cfgBlob := makeConfigBlobForTest(t, salt, 600_000)
+	cfgBlob := makeConfigBlobForTest(t, "AAAAAAAAAAAAAAAA", 600_000)
 	t.Setenv("VSYNC_CONFIG", string(cfgBlob))
 	t.Setenv("VSYNC_PASSPHRASE", "p")
 
@@ -104,8 +106,7 @@ func TestOpenS3FetchErrorPropagates(t *testing.T) {
 }
 
 func TestOpenManifestNotFoundPropagates(t *testing.T) {
-	salt := []byte("AAAAAAAAAAAAAAAA")
-	cfgBlob := makeConfigBlobForTest(t, salt, 600_000)
+	cfgBlob := makeConfigBlobForTest(t, "AAAAAAAAAAAAAAAA", 600_000)
 	t.Setenv("VSYNC_CONFIG", string(cfgBlob))
 	t.Setenv("VSYNC_PASSPHRASE", "p")
 
@@ -117,8 +118,8 @@ func TestOpenManifestNotFoundPropagates(t *testing.T) {
 }
 
 func TestOpenWrongPassphraseAfterFetch(t *testing.T) {
-	salt := []byte("AAAAAAAAAAAAAAAA")
-	bundle, _ := encryptRQE1ForTestRawSalt([]byte("{}"), "right-passphrase", salt, 600_000)
+	salt := "AAAAAAAAAAAAAAAA"
+	bundle, _ := encryptRQE1ForTest([]byte("{}"), "right-passphrase", salt, 600_000)
 	manifest := wrapManifestForTest("20260524-000000", bundle)
 
 	cfgBlob := makeConfigBlobForTest(t, salt, 600_000)
@@ -133,10 +134,10 @@ func TestOpenWrongPassphraseAfterFetch(t *testing.T) {
 }
 
 func TestOpenAcceptsDefaults(t *testing.T) {
-	salt := []byte("AAAAAAAAAAAAAAAA")
+	salt := "AAAAAAAAAAAAAAAA"
 	passphrase := "p"
 	plaintext := []byte(`{}`)
-	bundle, _ := encryptRQE1ForTestRawSalt(plaintext, passphrase, salt, 600_000)
+	bundle, _ := encryptRQE1ForTest(plaintext, passphrase, salt, 600_000)
 	manifest := wrapManifestForTest("20260524-000000", bundle)
 
 	cfgBlob := makeConfigBlobForTest(t, salt, 600_000)
@@ -155,18 +156,6 @@ func TestOpenAcceptsDefaults(t *testing.T) {
 	if c.Source("PORT") != SourceDefault {
 		t.Errorf("source mismatch")
 	}
-}
-
-// Helper that lets the vsync_test mint envelopes against the *raw* salt
-// bytes path the runtime uses (matches Open's config-blob → decoded-salt
-// flow). encryptRQE1ForTest uses the string flavor; for Open round-trips
-// we need to mint with whatever salt bytes the config-blob will produce.
-func encryptRQE1ForTestRawSalt(plaintext []byte, passphrase string, saltBytes []byte, iterations int) ([]byte, error) {
-	// The runtime decrypt path uses []byte(salt) where salt comes from
-	// the config blob's standard-base64-decoded field. To round-trip, we
-	// pretend to be the CLI: encrypt with the same raw bytes.
-	enc, err := encryptRQE1ForTest(plaintext, passphrase, string(saltBytes), iterations)
-	return enc, err
 }
 
 // _used keeps json+test imports warm when individual subtests are run.

@@ -123,7 +123,10 @@ func TestDecodeConfigBlobRejectsUnknownVersion(t *testing.T) {
 }
 
 func TestDecodeConfigBlobRejectsTooShortSalt(t *testing.T) {
-	// Decoded salt < 8 bytes → ConfigUnsupportedVersion per v0.12 §2.1.
+	// Salt string < configMinSaltChars (16) → ConfigUnsupportedVersion.
+	// Convention A: bytes fed to PBKDF2 are the salt string's UTF-8
+	// encoding verbatim, no base64-decode, so the floor is on character
+	// length not on decoded byte count.
 	inner := map[string]any{
 		"v":               1,
 		"endpoint":        "https://s3",
@@ -133,7 +136,7 @@ func TestDecodeConfigBlobRejectsTooShortSalt(t *testing.T) {
 		"secretAccessKey": "s",
 		"prefix":          "",
 		"env":             "prod",
-		"salt":            base64.StdEncoding.EncodeToString([]byte{1, 2, 3}), // 3 bytes
+		"salt":            "short", // 5 chars < 16
 		"iterations":      600000,
 	}
 	blob := buildConfigBlob(t, inner)

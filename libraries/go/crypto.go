@@ -55,10 +55,11 @@ func DecryptRQE1(envelope []byte, passphrase, salt string, iterations int) ([]by
 	return decryptRQE1WithSaltBytes(envelope, passphrase, []byte(salt), iterations)
 }
 
-// decryptRQE1WithSaltBytes is the byte-flavored entry point used by the
-// config-blob path (which decodes a standard-base64 salt field into raw
-// bytes). Keeps the runtime call site honest about whether it's feeding
-// a string or pre-decoded bytes to PBKDF2.
+// decryptRQE1WithSaltBytes is the byte-flavored entry point. Production
+// callers should use DecryptRQE1 (string flavor) since the live convention
+// (v0.12 §2.1) feeds the salt string's UTF-8 bytes to PBKDF2 verbatim.
+// Kept for symmetry with future byte-source contexts (e.g. a salt that
+// arrives outside the env-var path).
 func decryptRQE1WithSaltBytes(envelope []byte, passphrase string, salt []byte, iterations int) ([]byte, error) {
 	// Structural-length gate — see the team-lead's heuristic note:
 	// AES-GCM raises the same InvalidTag for "tag flipped" and "ciphertext
