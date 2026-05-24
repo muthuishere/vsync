@@ -68,11 +68,8 @@ func openWithBootstrap(ctx context.Context, cfgBlob []byte, passphrase string, o
 	if err != nil {
 		return nil, err
 	}
-	saltBytes, err := cfg.DecodedSalt()
-	if err != nil {
-		return nil, err
-	}
-
+	// Salt string per Convention A — feed UTF-8 bytes verbatim to PBKDF2,
+	// no base64-decode (v0.12 §2.1, post-bc52f51 spec correction).
 	options := openOptions{}
 	for _, o := range opts {
 		o(&options)
@@ -98,7 +95,7 @@ func openWithBootstrap(ctx context.Context, cfgBlob []byte, passphrase string, o
 	if _, _, err := UnwrapRQEM0001(manifestBytes); err != nil {
 		return nil, err
 	}
-	plaintext, err := decryptRQE1WithSaltBytes(bundleBytes, passphrase, saltBytes, cfg.Iterations)
+	plaintext, err := DecryptRQE1(bundleBytes, passphrase, cfg.Salt, cfg.Iterations)
 	if err != nil {
 		return nil, err
 	}

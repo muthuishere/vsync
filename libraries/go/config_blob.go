@@ -21,8 +21,13 @@ import (
 const (
 	configBlobMagic   = "vsync-cfg-v1:"
 	supportedInnerV   = 1
-	configMinSaltLen  = 8
-	bytesGzipMagicLen = 2 // gzip stream starts with 0x1f 0x8b
+	// Sanity floor on the salt's character length. The CLI emits a 24-char
+	// base64url ASCII string today; we floor at 16 chars so a typo'd /
+	// truncated blob still fails fast. The bytes fed to PBKDF2 are these
+	// chars' UTF-8 encoding verbatim — NOT base64-decoded. See v0.12 §2.1
+	// "Readers MUST feed the UTF-8 bytes of this string directly to PBKDF2".
+	configMinSaltChars = 16
+	bytesGzipMagicLen  = 2 // gzip stream starts with 0x1f 0x8b
 )
 
 // Config holds the decoded inner JSON of a VSYNC_CONFIG blob. Field names
@@ -36,24 +41,12 @@ type Config struct {
 	SecretAccessKey string `json:"secretAccessKey"`
 	Prefix          string `json:"prefix"`
 	Env             string `json:"env"`
-	Salt            string `json:"salt"`       // standard base64 (padding ok)
+	// Salt is the PBKDF2 salt as it appears in the blob. Readers MUST feed
+	// the UTF-8 bytes of this string verbatim to PBKDF2 (v0.12 §2.1, post-
+	// bc52f51 spec correction); do NOT base64-decode first, even though
+	// the CLI happens to mint a base64url-shaped string.
+	Salt            string `json:"salt"`
 	Iterations      int    `json:"iterations"` // PBKDF2-SHA256 work factor
-}
-
-// DecodedSalt returns the raw PBKDF2 salt bytes — std-base64-decoded from
-// Salt per v0.12 §2.1. Readers MUST feed these bytes directly to PBKDF2;
-// do not re-interpret as a UTF-8 string. Returns ErrConfigUnsupportedVersion
-// if the decoded length is implausibly short (< configMinSaltLen).
-func (c *Config) DecodedSalt() ([]byte, error) {
-	raw, err := base64.StdEncoding.DecodeString(c.Salt)
-	if err != nil {
-		return nil, fmt.Errorf("%w: salt field is not valid base64: %v", ErrConfigUnsupportedVersion, err)
-	}
-	if len(raw) < configMinSaltLen {
-		return nil, fmt.Errorf("%w: decoded salt is %d bytes (< %d minimum)",
-			ErrConfigUnsupportedVersion, len(raw), configMinSaltLen)
-	}
-	return raw, nil
 }
 
 // DecodeConfigBlob parses a VSYNC_CONFIG blob into a *Config. Errors map
@@ -116,10 +109,13 @@ func DecodeConfigBlob(blob []byte) (*Config, error) {
 	if cfg.Iterations <= 0 {
 		return nil, fmt.Errorf("%w: iterations must be > 0, got %d", ErrBundleCorrupt, cfg.Iterations)
 	}
-	// Validate salt length per v0.12 §2.1 (sanity floor, not a strict
-	// equality check — CLIs may emit variable-length salts).
-	if _, err := cfg.DecodedSalt(); err != nil {
-		return nil, err
+	// Sanity floor on the salt string's length — keeps obvious typos from
+	// silently weakening PBKDF2 input. The CLI's on-disk salts are 24 chars;
+	// 16 is forgiving without being meaningless. v0.12 §2.1 mandates the
+	// rejection point but lets the lib pick the threshold.
+	if len(cfg.Salt) < configMinSaltChars {
+		return nil, fmt.Errorf("%w: salt string is %d chars (< %d minimum)",
+			ErrConfigUnsupportedVersion, len(cfg.Salt), configMinSaltChars)
 	}
 	return &cfg, nil
 }
