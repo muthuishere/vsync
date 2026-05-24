@@ -65,6 +65,10 @@ vsync targets **small teams** where everyone trusts everyone in the org. There i
 
 For per-recipient cryptography (à la `age` / `sops`), see [v0.4 spec §12](/specs/v0.4-audit-log) — explicitly out of scope for 0.x.
 
----
+## Where to go next
 
-[Next: Crypto envelopes →](/architecture/crypto)
+- [Crypto envelopes →](/architecture/crypto)
+- [Audit append protocol →](/architecture/audit-protocol)
+- [Storage layout →](/architecture/storage-layout)
+- [Repo identity →](/architecture/repo-identity)
+- [Security model →](/architecture/security)

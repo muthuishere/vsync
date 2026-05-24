@@ -28,11 +28,13 @@ export default defineConfig({
     nav: [
       { text: "Guide", link: "/guide/quickstart" },
       { text: "Libraries", link: "/libraries/" },
+      { text: "Examples", link: "/examples/" },
       { text: "Architecture", link: "/architecture/mental-model" },
       {
         text: "0.11.0",
         items: [
           { text: "Changelog", link: "/guide/versioning" },
+          { text: "Upgrade to 0.11", link: "/guide/upgrade-to-0.11" },
           { text: "npm — CLI", link: "https://www.npmjs.com/package/@muthuishere/vsync" },
           { text: "npm — TS lib", link: "https://www.npmjs.com/package/@muthuishere/vsync-s3-client" },
           { text: "PyPI — Python lib", link: "https://pypi.org/project/vsync-s3-client/" },
@@ -50,6 +52,7 @@ export default defineConfig({
           items: [
             { text: "Quickstart", link: "/guide/quickstart" },
             { text: "Install", link: "/guide/install" },
+            { text: "First team setup", link: "/guide/first-team-setup" },
           ],
         },
         {
@@ -71,10 +74,20 @@ export default defineConfig({
           ],
         },
         {
+          text: "Runbooks & incident response",
+          items: [
+            { text: "Rotate the passphrase", link: "/guide/rotate-passphrase-runbook" },
+            { text: "Rotate the IAM key", link: "/guide/iam-rotation-runbook" },
+            { text: "Incident response", link: "/guide/incident-response" },
+          ],
+        },
+        {
           text: "Reference",
           items: [
             { text: "Command reference", link: "/guide/commands" },
             { text: "Troubleshooting", link: "/guide/troubleshooting" },
+            { text: "FAQ", link: "/guide/faq" },
+            { text: "Upgrade to 0.11", link: "/guide/upgrade-to-0.11" },
             { text: "Versioning", link: "/guide/versioning" },
           ],
         },
@@ -84,7 +97,16 @@ export default defineConfig({
         {
           text: "Runtime libraries",
           items: [
-            { text: "Overview & quickstart", link: "/libraries/" },
+            { text: "Overview & comparison", link: "/libraries/" },
+          ],
+        },
+        {
+          text: "Per language",
+          items: [
+            { text: "Python", link: "/libraries/python" },
+            { text: "TypeScript / Node", link: "/libraries/typescript" },
+            { text: "Go", link: "/libraries/go" },
+            { text: "Java", link: "/libraries/java" },
           ],
         },
         {
@@ -97,6 +119,47 @@ export default defineConfig({
         },
       ],
 
+      "/examples/": [
+        {
+          text: "Examples gallery",
+          items: [
+            { text: "Index", link: "/examples/" },
+          ],
+        },
+        {
+          text: "Python",
+          items: [
+            { text: "Django + Vercel", link: "/examples/django-vercel" },
+            { text: "FastAPI + Cloud Run", link: "/examples/fastapi-cloud-run" },
+          ],
+        },
+        {
+          text: "TypeScript / Node",
+          items: [
+            { text: "Next.js + Vercel", link: "/examples/nextjs-vercel" },
+            { text: "Express + Fly.io", link: "/examples/express-fly" },
+          ],
+        },
+        {
+          text: "Go",
+          items: [
+            { text: "Go HTTP service + AWS ECS", link: "/examples/go-service-ecs" },
+          ],
+        },
+        {
+          text: "Java",
+          items: [
+            { text: "Spring Boot + AWS EKS", link: "/examples/spring-boot-eks" },
+          ],
+        },
+        {
+          text: "Any language",
+          items: [
+            { text: "VPS + docker-compose", link: "/examples/vps-docker-compose" },
+          ],
+        },
+      ],
+
       "/architecture/": [
         {
           text: "How vsync works",
@@ -104,6 +167,7 @@ export default defineConfig({
             { text: "Mental model", link: "/architecture/mental-model" },
             { text: "Crypto envelopes", link: "/architecture/crypto" },
             { text: "Audit append protocol", link: "/architecture/audit-protocol" },
+            { text: "Storage layout", link: "/architecture/storage-layout" },
             { text: "Repo identity", link: "/architecture/repo-identity" },
             { text: "Security model", link: "/architecture/security" },
           ],
