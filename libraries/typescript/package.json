@@ -1,6 +1,6 @@
 {
   "name": "@muthuishere/vsync-s3-client",
-  "version": "0.1.0",
+  "version": "0.11.0",
   "description": "Read-side runtime library for the vsync ecosystem. Reads VSYNC_CONFIG + VSYNC_PASSPHRASE, fetches the manifest+bundle from S3, decrypts in-memory, exposes a get/has/source accessor with a deterministic fallback chain.",
   "type": "module",
   "main": "dist/index.js",

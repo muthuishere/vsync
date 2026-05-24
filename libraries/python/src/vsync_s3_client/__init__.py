@@ -26,7 +26,7 @@ from .exceptions import (
     WrongPassphraseError,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.11.0"
 
 __all__ = [
     "open",

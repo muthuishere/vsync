@@ -7,7 +7,7 @@ This is the **reference implementation** for the cross-language client family โ€
 - **Spec:** [`docs/specs/v0.12-vsync-s3-client.md`](../../docs/specs/v0.12-vsync-s3-client.md)
 - **Conformance corpus:** [`docs/specs/test-vectors/`](../../docs/specs/test-vectors/)
 - **Wire envelope:** RQE1 ([v0.2 ยง3](../../docs/specs/v0.2-secret-lib.md)) + RQEM0001 ([v0.4](../../docs/specs/v0.4-audit-log.md))
-- **Package version:** `0.1.0` (pre-1.0; latest wire format only; no compatibility shims)
+- **Package version:** `0.11.0` (unified across the vsync CLI + all three language libs; pre-1.0; latest wire format only; no compatibility shims)
 
 ## Install
 

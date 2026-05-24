@@ -7,7 +7,7 @@ This is the **Go port** of the cross-language client family — Python (referenc
 - **Spec:** [`docs/specs/v0.12-vsync-s3-client.md`](../../docs/specs/v0.12-vsync-s3-client.md)
 - **Conformance corpus:** [`docs/specs/test-vectors/`](../../docs/specs/test-vectors/)
 - **Wire envelope:** RQE1 ([v0.2 §3](../../docs/specs/v0.2-secret-lib.md)) + RQEM0001 ([v0.4](../../docs/specs/v0.4-audit-log.md))
-- **Module version:** `0.1.0` (pre-1.0; latest wire format only; no compatibility shims)
+- **Module version:** `0.11.0` (unified across the vsync CLI + all three language libs; pre-1.0; latest wire format only; no compatibility shims)
 
 ## Install
 
@@ -22,11 +22,11 @@ Targets Go ≥ 1.22. Runtime deps: `github.com/aws/aws-sdk-go-v2/service/s3` (an
 Per decision H (subpath modules), tags use the directory prefix:
 
 ```bash
-git tag libraries/go/v0.1.0
-git push origin libraries/go/v0.1.0
+git tag libraries/go/v0.11.0
+git push origin libraries/go/v0.11.0
 ```
 
-`go get github.com/muthuishere/vsync/libraries/go@v0.1.0` then resolves cleanly.
+`go get github.com/muthuishere/vsync/libraries/go@v0.11.0` then resolves cleanly.
 
 ## Quick start
 
