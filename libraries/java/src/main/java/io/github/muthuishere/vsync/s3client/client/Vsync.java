@@ -1,6 +1,7 @@
 package io.github.muthuishere.vsync.s3client.client;
 
 import io.github.muthuishere.vsync.s3client.assetpath.AssetMaterializer;
+import io.github.muthuishere.vsync.s3client.config.VsyncConfig;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -28,21 +29,34 @@ public final class Vsync implements AutoCloseable {
     private final Map<String, String> kv;
     private final Map<String, byte[]> assets;
     private final Map<String, String> defaults;
-    private final int generation;
+    private final long generation;
     private final String env;
+    /**
+     * Bound at open() so {@link #remoteGeneration} can re-fetch without
+     * re-resolving bootstrap. Null only for the no-fetcher
+     * {@link #fromVaultForTest} overload — calling
+     * {@code remoteGeneration} / {@code hasNewVersion} on such a handle
+     * raises {@link IllegalStateException}.
+     */
+    private final S3Fetcher fetcher;
+    private final VsyncConfig cfg;
     private AssetMaterializer materializer;
     private boolean closed;
 
     Vsync(Map<String, String> kv,
           Map<String, byte[]> assets,
           Map<String, String> defaults,
-          int generation,
-          String env) {
+          long generation,
+          String env,
+          S3Fetcher fetcher,
+          VsyncConfig cfg) {
         this.kv = kv;
         this.assets = assets;
         this.defaults = defaults;
         this.generation = generation;
         this.env = env;
+        this.fetcher = fetcher;
+        this.cfg = cfg;
     }
 
     /** Resolve {@code key} through vault → env → defaults → missing. */
@@ -122,8 +136,45 @@ public final class Vsync implements AutoCloseable {
     }
 
     /** Monotonic gen counter from the manifest meta cell. Safe to log. */
-    public int generation() {
+    public long generation() {
         return generation;
+    }
+
+    /**
+     * Re-fetch the remote {@code gen} counter via a single manifest read —
+     * the v0.12 §7.1 {@code has_new_version} carve-out. Does NOT mutate the
+     * local {@link #generation()}; the in-memory bundle is unchanged.
+     *
+     * <p>Synchronous-blocking: one network round-trip. Wrap in
+     * {@code CompletableFuture.supplyAsync(v::remoteGeneration)} if the
+     * caller wants async.
+     *
+     * @throws io.github.muthuishere.vsync.s3client.exceptions.S3UnreachableException
+     *         on network / IAM failure (matches {@link VsyncClient#open}).
+     * @throws io.github.muthuishere.vsync.s3client.exceptions.ManifestNotFoundException
+     *         if the manifest object is absent (env was never pushed).
+     */
+    public long remoteGeneration() {
+        ensureOpen();
+        if (fetcher == null || cfg == null) {
+            throw new IllegalStateException(
+                    "Vsync: handle has no S3 fetcher bound — "
+                            + "remoteGeneration is only available on handles opened via VsyncClient.open()");
+        }
+        return fetcher.fetchGeneration(cfg);
+    }
+
+    /**
+     * Convenience: {@code true} iff {@link #remoteGeneration()} is strictly
+     * greater than {@link #generation()}. Same exceptions as
+     * {@link #remoteGeneration()}.
+     *
+     * <p>A {@code false} answer when remote &lt; local (theoretical gen
+     * regression) is by design — the contract is strictly "is there a newer
+     * version upstream?", not "is local out of sync?".
+     */
+    public boolean hasNewVersion() {
+        return remoteGeneration() > generation();
     }
 
     /** Selected env (the one this handle was opened for). Safe to log. */
@@ -171,18 +222,41 @@ public final class Vsync implements AutoCloseable {
      * Test hook — construct a {@code Vsync} with a pre-populated vault,
      * bypassing the S3 round trip. Production callers must use
      * {@link VsyncClient#open()}.
+     *
+     * <p>{@link #remoteGeneration} / {@link #hasNewVersion} on a handle
+     * created this way raise {@link IllegalStateException} — there's no
+     * fetcher bound. Use {@link #fromVaultForTest(Map, Map, Map, long, String,
+     * S3Fetcher, VsyncConfig)} to exercise the polling path.
      */
     public static Vsync fromVaultForTest(
             Map<String, String> kv,
             Map<String, byte[]> assets,
             Map<String, String> defaults,
-            int generation,
+            long generation,
             String env) {
+        return fromVaultForTest(kv, assets, defaults, generation, env, null, null);
+    }
+
+    /**
+     * Test hook with a bound fetcher + config — same as the 5-arg overload
+     * but lets the test exercise {@link #remoteGeneration} /
+     * {@link #hasNewVersion} against a fake {@link S3Fetcher}.
+     */
+    public static Vsync fromVaultForTest(
+            Map<String, String> kv,
+            Map<String, byte[]> assets,
+            Map<String, String> defaults,
+            long generation,
+            String env,
+            S3Fetcher fetcher,
+            VsyncConfig cfg) {
         return new Vsync(
                 kv == null ? new HashMap<>() : new HashMap<>(kv),
                 assets == null ? new HashMap<>() : new HashMap<>(assets),
                 defaults == null ? new HashMap<>() : new HashMap<>(defaults),
                 generation,
-                env);
+                env,
+                fetcher,
+                cfg);
     }
 }

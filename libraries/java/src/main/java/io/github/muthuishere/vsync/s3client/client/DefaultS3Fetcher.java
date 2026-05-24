@@ -52,8 +52,30 @@ final class DefaultS3Fetcher implements S3Fetcher {
             Rqem0001.Result m = Rqem0001.unwrap(manifestBytes);
             String bundleKey = cfg.prefix() + "v=" + m.timestamp();
             byte[] bundleBytes = getObject(client, cfg.bucket(), bundleKey, /*isManifest*/ false);
-            int gen = fetchOptionalGeneration(client, cfg);
+            long gen = fetchOptionalGeneration(client, cfg);
             return new Fetched(manifestBytes, bundleBytes, gen);
+        } finally {
+            client.close();
+        }
+    }
+
+    /**
+     * Override the default {@code fetchGeneration} to skip the bundle GET.
+     * Still GETs the manifest object first so the
+     * {@link ManifestNotFoundException} contract holds when the env has
+     * never been pushed.
+     */
+    @Override
+    public long fetchGeneration(VsyncConfig cfg) {
+        S3Client client = buildClient(cfg);
+        try {
+            String manifestKey = cfg.prefix() + "manifest";
+            // GET (not HEAD) so a missing object surfaces as
+            // ManifestNotFoundException via the shared error mapping —
+            // S3 SDK v2 doesn't materially cheapen the manifest read with
+            // HEAD since the body is tiny (~24 bytes).
+            getObject(client, cfg.bucket(), manifestKey, /*isManifest*/ true);
+            return fetchOptionalGeneration(client, cfg);
         } finally {
             client.close();
         }
@@ -88,20 +110,23 @@ final class DefaultS3Fetcher implements S3Fetcher {
         }
     }
 
-    private int fetchOptionalGeneration(S3Client client, VsyncConfig cfg) {
+    private long fetchOptionalGeneration(S3Client client, VsyncConfig cfg) {
         try {
             byte[] meta = client.getObjectAsBytes(GetObjectRequest.builder()
                     .bucket(cfg.bucket())
                     .key(cfg.prefix() + "latest.meta")
                     .build()).asByteArray();
             JsonNode node = MAPPER.readTree(meta);
-            if (node != null && node.has("gen") && node.get("gen").isInt()) {
-                return node.get("gen").intValue();
+            if (node != null && node.has("gen")) {
+                JsonNode g = node.get("gen");
+                if (g.isIntegralNumber()) {
+                    return g.asLong();
+                }
             }
         } catch (Exception ignored) {
             // Pre-rotation bundle has no meta cell — gen stays 0.
         }
-        return 0;
+        return 0L;
     }
 
     private static S3Client buildClient(VsyncConfig cfg) {

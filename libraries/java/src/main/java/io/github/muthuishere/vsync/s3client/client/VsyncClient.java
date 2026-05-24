@@ -84,7 +84,9 @@ public final class VsyncClient {
                 parsed.assets,
                 new HashMap<>(effective.defaults()),
                 fetched.generation(),
-                cfg.env());
+                cfg.env(),
+                fetcher,
+                cfg);
     }
 
     private record ParsedVault(Map<String, String> kv, Map<String, byte[]> assets) {

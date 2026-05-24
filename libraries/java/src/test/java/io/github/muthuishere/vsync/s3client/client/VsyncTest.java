@@ -1,5 +1,8 @@
 package io.github.muthuishere.vsync.s3client.client;
 
+import io.github.muthuishere.vsync.s3client.config.VsyncConfig;
+import io.github.muthuishere.vsync.s3client.exceptions.ManifestNotFoundException;
+import io.github.muthuishere.vsync.s3client.exceptions.S3UnreachableException;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
@@ -201,6 +204,105 @@ class VsyncTest {
         // Closing without ever calling assetPath() must not blow up.
         Vsync v = Vsync.fromVaultForTest(Map.of("k", "v"), null, null, 0, "test");
         assertNotNull(v);
+        v.close();
+    }
+
+    // ─── remoteGeneration / hasNewVersion (v0.12 §4.4, §4.5, §7.1) ─────────
+
+    private static VsyncConfig stubCfg() {
+        return new VsyncConfig(
+                1, "https://s3.example", "us-east-1", "b",
+                "k", "s", "myapp/prod/", "prod",
+                "abcdefghijklmnopqrstuv", 1000);
+    }
+
+    /** Stateful fetcher whose {@code fetchGeneration} returns a separately-controlled value. */
+    private static final class StubFetcher implements S3Fetcher {
+        long genForRemote;
+        boolean throwUnreachable;
+        boolean throwManifestNotFound;
+
+        @Override
+        public Fetched fetch(VsyncConfig cfg) {
+            throw new UnsupportedOperationException(
+                    "this stub only services fetchGeneration() — open() not exercised here");
+        }
+
+        @Override
+        public long fetchGeneration(VsyncConfig cfg) {
+            if (throwUnreachable) {
+                throw new S3UnreachableException("simulated network down");
+            }
+            if (throwManifestNotFound) {
+                throw new ManifestNotFoundException("simulated 404");
+            }
+            return genForRemote;
+        }
+    }
+
+    @Test
+    void remoteGenerationReturnsRemoteGenLocalUntouched() {
+        StubFetcher fetcher = new StubFetcher();
+        fetcher.genForRemote = 7L;
+        // Local gen captured at open == 5; remote answers 7.
+        Vsync v = Vsync.fromVaultForTest(null, null, null, 5, "prod",
+                fetcher, stubCfg());
+        assertEquals(5L, v.generation());
+        assertEquals(7L, v.remoteGeneration());
+        // Polling MUST NOT mutate the local generation (v0.12 §4.5).
+        assertEquals(5L, v.generation());
+        v.close();
+    }
+
+    @Test
+    void remoteGenerationThrowsS3UnreachableOnNetworkFailure() {
+        StubFetcher fetcher = new StubFetcher();
+        fetcher.throwUnreachable = true;
+        Vsync v = Vsync.fromVaultForTest(null, null, null, 5, "prod",
+                fetcher, stubCfg());
+        assertThrows(S3UnreachableException.class, v::remoteGeneration);
+        v.close();
+    }
+
+    @Test
+    void remoteGenerationThrowsManifestNotFoundOn404() {
+        StubFetcher fetcher = new StubFetcher();
+        fetcher.throwManifestNotFound = true;
+        Vsync v = Vsync.fromVaultForTest(null, null, null, 5, "prod",
+                fetcher, stubCfg());
+        assertThrows(ManifestNotFoundException.class, v::remoteGeneration);
+        v.close();
+    }
+
+    @Test
+    void hasNewVersionTrueWhenLocalBehind() {
+        StubFetcher fetcher = new StubFetcher();
+        fetcher.genForRemote = 4L;
+        Vsync v = Vsync.fromVaultForTest(null, null, null, 3, "prod",
+                fetcher, stubCfg());
+        assertTrue(v.hasNewVersion());
+        v.close();
+    }
+
+    @Test
+    void hasNewVersionFalseWhenLocalCurrent() {
+        StubFetcher fetcher = new StubFetcher();
+        fetcher.genForRemote = 5L;
+        Vsync v = Vsync.fromVaultForTest(null, null, null, 5, "prod",
+                fetcher, stubCfg());
+        assertFalse(v.hasNewVersion());
+        v.close();
+    }
+
+    @Test
+    void hasNewVersionFalseWhenLocalAhead() {
+        // Theoretical "gen went backward" case — never expected in practice,
+        // but the contract is strictly `remote > local`, so this must be false.
+        StubFetcher fetcher = new StubFetcher();
+        fetcher.genForRemote = 8L;
+        Vsync v = Vsync.fromVaultForTest(null, null, null, 10, "prod",
+                fetcher, stubCfg());
+        assertFalse(v.hasNewVersion());
         v.close();
     }
 }

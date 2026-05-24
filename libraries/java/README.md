@@ -48,7 +48,9 @@ try (Vsync v = VsyncClient.open()) {
     Source src = v.source("DATABASE_URL");                       // VAULT | ENV | DEFAULT | MISSING
     java.nio.file.Path svc = v.assetPath("svc.json");            // lazy 0600 tempfile
     byte[] svcBytes = v.assetBytes("svc.json");                  // bytes, no filesystem
-    int gen = v.generation();                                    // monotonic counter, safe to log
+    long gen = v.generation();                                   // monotonic counter, safe to log
+    long remote = v.remoteGeneration();                          // one manifest read, doesn't mutate local
+    boolean stale = v.hasNewVersion();                           // remote > local
 }
 ```
 
