@@ -28,6 +28,8 @@ from vsync_s3_client.exceptions import (
     BundleCorruptError,
     ConfigMissingError,
     ConfigUnsupportedVersionError,
+    ManifestNotFoundError,
+    S3UnreachableError,
 )
 
 
@@ -426,3 +428,172 @@ def test_kdf_salt_returns_24_char_cli_salt_unchanged():
     )
     assert result == cli_salt
     assert len(result) == 24, "the 24-char wire shape must round-trip verbatim"
+
+
+# ─── remote_generation / has_new_version (v0.12 §4.1, §7.1) ────────────
+#
+# The pull-once rule (§7) covers the BUNDLE — the decrypted vault stays in
+# memory and never refreshes. The carve-out is the explicit poll for the
+# remote manifest's gen counter: callers (healthcheck endpoints, sidecar
+# crons) ask "is upstream newer than what I opened with?" and decide
+# whether to trigger a restart. The local `generation()` is NEVER mutated
+# by polling — that's the whole point of the carve-out.
+
+
+def _open_with_fetcher(monkeypatch, fetcher, passphrase="pp", payload_kv=None):
+    """Helper: drive open() through an injected fetcher and return the handle.
+
+    The fetcher must yield a valid bundle for at least the first call —
+    open() decrypts it. Subsequent calls can return anything the test
+    needs (different gen, raise, etc.) — remote_generation() exercises
+    only the gen field.
+    """
+    from vsync_s3_client.crypto import encrypt_rqe1_for_test
+
+    salt = _TEST_SALT_STR
+    vault_json = json.dumps(payload_kv or {"X": "y"}).encode()
+    bundle = encrypt_rqe1_for_test(vault_json, passphrase, salt)
+    manifest = b"RQEM0001" + b"20260601-000000" + b"meta"
+    # Tests that want to mutate the gen across calls hook into this via
+    # the `fetcher` they pass in; this helper just installs it.
+    _set_s3_fetcher(fetcher(manifest, bundle))
+    monkeypatch.setenv("VSYNC_CONFIG", _make_config_blob())
+    monkeypatch.setenv("VSYNC_PASSPHRASE", passphrase)
+    return vsync_open()
+
+
+def test_remote_generation_returns_remote_gen(monkeypatch):
+    """Local gen captured at open; remote_generation() returns the fresh
+    fetcher value. Local gen is NOT mutated by polling.
+    """
+    calls = {"n": 0}
+
+    def make_fetcher(manifest, bundle):
+        def fetcher(cfg):
+            calls["n"] += 1
+            # First call (open) → gen=5; later calls → gen=7.
+            gen = 5 if calls["n"] == 1 else 7
+            return manifest, bundle, gen
+        return fetcher
+
+    _reset_singleton()
+    try:
+        v = _open_with_fetcher(monkeypatch, make_fetcher)
+        try:
+            assert v.generation() == 5
+            assert v.remote_generation() == 7
+            # Local gen must NOT mutate — this is the load-bearing
+            # invariant from spec §7.1.
+            assert v.generation() == 5
+        finally:
+            v.close()
+    finally:
+        _set_s3_fetcher(None)
+
+
+def test_remote_generation_raises_on_network_failure(monkeypatch):
+    """S3UnreachableError from the fetcher propagates verbatim."""
+    state = {"open_done": False}
+
+    def make_fetcher(manifest, bundle):
+        def fetcher(cfg):
+            if not state["open_done"]:
+                state["open_done"] = True
+                return manifest, bundle, 3
+            raise S3UnreachableError("simulated network failure")
+        return fetcher
+
+    _reset_singleton()
+    try:
+        v = _open_with_fetcher(monkeypatch, make_fetcher)
+        try:
+            with pytest.raises(S3UnreachableError):
+                v.remote_generation()
+        finally:
+            v.close()
+    finally:
+        _set_s3_fetcher(None)
+
+
+def test_remote_generation_raises_on_manifest_404(monkeypatch):
+    """ManifestNotFoundError from the fetcher propagates verbatim."""
+    state = {"open_done": False}
+
+    def make_fetcher(manifest, bundle):
+        def fetcher(cfg):
+            if not state["open_done"]:
+                state["open_done"] = True
+                return manifest, bundle, 3
+            raise ManifestNotFoundError("simulated manifest 404")
+        return fetcher
+
+    _reset_singleton()
+    try:
+        v = _open_with_fetcher(monkeypatch, make_fetcher)
+        try:
+            with pytest.raises(ManifestNotFoundError):
+                v.remote_generation()
+        finally:
+            v.close()
+    finally:
+        _set_s3_fetcher(None)
+
+
+def test_has_new_version_when_local_is_behind(monkeypatch):
+    """local=3, remote=4 → True."""
+    calls = {"n": 0}
+
+    def make_fetcher(manifest, bundle):
+        def fetcher(cfg):
+            calls["n"] += 1
+            return manifest, bundle, 3 if calls["n"] == 1 else 4
+        return fetcher
+
+    _reset_singleton()
+    try:
+        v = _open_with_fetcher(monkeypatch, make_fetcher)
+        try:
+            assert v.has_new_version() is True
+        finally:
+            v.close()
+    finally:
+        _set_s3_fetcher(None)
+
+
+def test_has_new_version_when_local_is_current(monkeypatch):
+    """local=5, remote=5 → False (strictly greater)."""
+    def make_fetcher(manifest, bundle):
+        def fetcher(cfg):
+            return manifest, bundle, 5
+        return fetcher
+
+    _reset_singleton()
+    try:
+        v = _open_with_fetcher(monkeypatch, make_fetcher)
+        try:
+            assert v.has_new_version() is False
+        finally:
+            v.close()
+    finally:
+        _set_s3_fetcher(None)
+
+
+def test_has_new_version_when_local_is_ahead(monkeypatch):
+    """local=10, remote=8 (shouldn't happen, guard anyway) → False."""
+    calls = {"n": 0}
+
+    def make_fetcher(manifest, bundle):
+        def fetcher(cfg):
+            calls["n"] += 1
+            return manifest, bundle, 10 if calls["n"] == 1 else 8
+        return fetcher
+
+    _reset_singleton()
+    try:
+        v = _open_with_fetcher(monkeypatch, make_fetcher)
+        try:
+            assert v.has_new_version() is False
+        finally:
+            v.close()
+    finally:
+        _set_s3_fetcher(None)

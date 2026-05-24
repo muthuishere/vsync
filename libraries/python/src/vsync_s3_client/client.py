@@ -117,6 +117,8 @@ class Vsync:
         generation: int,
         env: str,
         defaults: Optional[Mapping[str, str]] = None,
+        _cfg: Optional[VsyncConfig] = None,
+        _fetcher: Optional[Any] = None,
     ) -> None:
         self._kv: Dict[str, str] = dict(kv)
         self._assets: Dict[str, bytes] = dict(assets)
@@ -125,6 +127,12 @@ class Vsync:
         self._env: str = env
         self._closed: bool = False
         self._asset_materializer: Optional[AssetMaterializer] = None
+        # Captured at open() time so remote_generation() can re-poll
+        # through the same fetcher seam. Tests that build a handle via
+        # `_from_vault` leave both None — remote_generation() will then
+        # raise (no S3 to poll).
+        self._cfg: Optional[VsyncConfig] = _cfg
+        self._fetcher = _fetcher
 
     # ─── Fallback chain (v0.12 §5) ──────────────────────────────────────
 
@@ -213,6 +221,37 @@ class Vsync:
     def generation(self) -> int:
         """Monotonic gen counter from the manifest meta cell. Safe to log."""
         return self._generation
+
+    def remote_generation(self) -> int:
+        """Fetch the manifest's current `gen` from S3 and return it.
+
+        The explicit-poll carve-out from spec §7.1. Does NOT mutate
+        `self._generation` — the cached open-time value stays whatever
+        `open()` captured. The lib remains read-only and stateless beyond
+        what was already there.
+
+        Errors from the underlying fetcher propagate verbatim
+        (`S3UnreachableError`, `ManifestNotFoundError`). Callers (health-
+        check endpoints, sidecar crons) decide whether "stale" means
+        "restart" — the library only answers the question.
+        """
+        if self._closed:
+            raise ValueError("Vsync: handle is closed")
+        if self._cfg is None or self._fetcher is None:
+            raise VSyncError(
+                "Vsync: remote_generation() requires a handle opened via "
+                "`open()` — `_from_vault` test handles have no S3 binding"
+            )
+        _manifest, _bundle, gen = self._fetcher(self._cfg)
+        return int(gen)
+
+    def has_new_version(self) -> bool:
+        """Convenience: True iff `remote_generation() > generation()`.
+
+        Strictly greater — `local == remote` and `local > remote` both
+        return False. Same error propagation as `remote_generation()`.
+        """
+        return self.remote_generation() > self._generation
 
     # ─── Lifecycle ─────────────────────────────────────────────────────
 
@@ -394,6 +433,8 @@ def open(  # noqa: A001 - matches spec API verbatim (v0.12 §4.1)
         generation=gen,
         env=cfg.env,
         defaults=defaults,
+        _cfg=cfg,
+        _fetcher=fetcher,
     )
 
 
