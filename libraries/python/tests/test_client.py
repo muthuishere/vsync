@@ -339,3 +339,90 @@ def test_module_level_get_uses_singleton(monkeypatch):
     finally:
         _reset_singleton()
         _set_s3_fetcher(None)
+
+
+def test_runtime_roundtrip_against_cli_salt_format(monkeypatch):
+    """End-to-end production-path check (team-lead's spec verification).
+
+    Simulates the bytes `vsync runtime-token` emits at commit bc52f51 —
+    `salt` is a 24-char ASCII string written verbatim into the blob
+    (Convention A; NO base64 wrap on the wire). The runtime lib MUST
+    feed those 24 utf-8 bytes to PBKDF2, byte-identical to what
+    `src/crypto.ts::deriveKey` does on encrypt. A previous Convention-B
+    misread would base64-decode this 24-char string into 16 raw bytes
+    → different PBKDF2 input → different key → decryption fails.
+
+    This test bypasses the conformance loader (which doesn't exercise
+    `_kdf_salt`) and drives `open()` end-to-end so the production code
+    path is the one under test.
+    """
+    from vsync_s3_client.crypto import encrypt_rqe1_for_test
+    import base64
+    import gzip
+
+    # Real-shaped 24-char base64 ASCII salt — what runtime-token emits.
+    cli_salt = "20ZiDJFKLLkDsDUiWSMn3g=="
+    passphrase = "test-passphrase"
+
+    # Encrypt as the CLI would: salt string → utf-8 bytes → PBKDF2.
+    # The `str` branch of `_derive_key` does exactly this; we pass the
+    # string here to mirror src/crypto.ts.
+    plaintext = b'{"HELLO":"world"}'
+    bundle = encrypt_rqe1_for_test(plaintext, passphrase, cli_salt)
+    manifest = b"RQEM0001" + b"20260601-000000" + b"meta"
+
+    # Build a blob whose `salt` field is the cli_salt VERBATIM (no wrap),
+    # matching bin/runtime-token.ts at bc52f51.
+    inner = json.dumps(
+        {
+            "v": 1,
+            "endpoint": "https://s3.example.com",
+            "region": "us-east-1",
+            "bucket": "b",
+            "accessKeyId": "k",
+            "secretAccessKey": "s",
+            "prefix": "p/",
+            "env": "prod",
+            "salt": cli_salt,
+            "iterations": 600000,
+        }
+    ).encode()
+    gz = gzip.compress(inner)
+    b64 = base64.urlsafe_b64encode(gz).rstrip(b"=").decode("ascii")
+    config_blob = f"vsync-cfg-v1:{b64}"
+
+    def fetcher(cfg):
+        # Belt-and-braces: also confirm the lib parsed salt verbatim.
+        assert cfg.salt == cli_salt, (
+            f"runtime path saw salt {cfg.salt!r}, expected {cli_salt!r} — "
+            "the lib must NOT transform the wire salt field"
+        )
+        return manifest, bundle, 0
+
+    _set_s3_fetcher(fetcher)
+    try:
+        monkeypatch.setenv("VSYNC_CONFIG", config_blob)
+        monkeypatch.setenv("VSYNC_PASSPHRASE", passphrase)
+        with vsync_open() as v:
+            assert v.get("HELLO") == "world"
+    finally:
+        _set_s3_fetcher(None)
+
+
+def test_kdf_salt_returns_24_char_cli_salt_unchanged():
+    """Convention-A regression guard at the salt-extraction boundary.
+
+    The exact byte sequence runtime-token emits — 24-char base64 ASCII —
+    must come out of `_kdf_salt` as the same Python `str`, not as 16
+    base64-decoded raw bytes. Independent of the round-trip test above
+    so a regression here pinpoints `_kdf_salt` directly.
+    """
+    cli_salt = "20ZiDJFKLLkDsDUiWSMn3g=="
+    cfg = _cfg(salt=cli_salt)
+    result = _kdf_salt(cfg)
+    assert isinstance(result, str), (
+        f"_kdf_salt must return str (Convention A), got {type(result).__name__} "
+        "— a `bytes` return is the convention-B regression signature"
+    )
+    assert result == cli_salt
+    assert len(result) == 24, "the 24-char wire shape must round-trip verbatim"
