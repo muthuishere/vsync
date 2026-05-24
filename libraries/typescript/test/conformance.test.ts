@@ -228,9 +228,9 @@ async function runFallbackChain(v: Vector): Promise<void> {
       for (let i = 0; i < queries.length; i++) {
         const q = queries[i];
         const w = expected[i];
-        expect(handle.get(q), `${v.name}: get(${q})`).toBe(w.value);
-        expect(handle.source(q), `${v.name}: source(${q})`).toBe(w.source);
-        expect(handle.has(q), `${v.name}: has(${q})`).toBe(w.has);
+        expect(handle.getEnv(q), `${v.name}: getEnv(${q})`).toBe(w.value);
+        expect(handle.envSource(q), `${v.name}: envSource(${q})`).toBe(w.source);
+        expect(handle.hasEnv(q), `${v.name}: hasEnv(${q})`).toBe(w.has);
       }
     } finally {
       await handle.close();
@@ -248,22 +248,11 @@ async function runAssetPath(v: Vector): Promise<void> {
   const inputs = v.meta.inputs;
   const key = inputs.key as string;
   const handle = Vsync._fromVault({ assets: { [key]: new Uint8Array(v.bin!) } });
-  let path: string | null = null;
   try {
-    const back = handle.assetBytes(key);
+    const back = handle.getAsContent(key);
     expect(Buffer.from(back).toString("hex")).toBe(v.meta.expected.bytes_hex);
-    path = await handle.assetPath(key);
-    const onDisk = readFileSync(path);
-    expect(onDisk.equals(v.bin!)).toBe(true);
-    if (process.platform !== "win32") {
-      const expectedOctal = (v.meta.expected.mode_octal as string).padStart(4, "0");
-      const got = (statSync(path).mode & 0o777).toString(8).padStart(4, "0");
-      expect(got).toBe(expectedOctal);
-    }
   } finally {
     await handle.close();
-    // close() must have unlinked the tempdir.
-    if (path !== null) expect(existsSync(path)).toBe(false);
   }
 }
 

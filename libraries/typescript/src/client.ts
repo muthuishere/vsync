@@ -1,22 +1,21 @@
-// Public Vsync handle + module-level open() / get() facade.
+// Public Vsync handle + module-level open() / openWith() / getEnv() facade.
 //
 // This binds together:
 //   - sources.resolveBootstrapInputs (two-env-var contract)
 //   - config-blob.decodeConfigBlob   (VSYNC_CONFIG decode)
 //   - manifest.verifyAgainstRemoteTs (RQEM0001 read + anti-rollback)
 //   - crypto.decryptRqe1             (RQE1 decrypt)
-//   - assetpath.AssetMaterializer    (lazy 0600 tempfile for assetPath)
 //   - the fallback chain (vault → env → defaults → missing)
 //
 // Vault wire format inside the decrypted bundle (v0.12 §6 + Python lib):
 //   { "kv": {...}, "assets": {"name": "<base64-bytes>"} }
 // Backwards-compat: a flat object at the root is treated as `kv` only.
 
-import { AssetMaterializer } from "./assetpath.js";
 import { decodeConfigBlob, type VsyncConfig } from "./config-blob.js";
 import { decryptRqe1 } from "./crypto.js";
 import {
   BundleCorruptError,
+  ConfigMissingError,
   ManifestNotFoundError,
   S3UnreachableError,
   VSyncError,
@@ -43,6 +42,13 @@ export type S3Fetcher = (cfg: VsyncConfigSnapshot) => Promise<S3FetchResult>;
 
 /** `open()` options. */
 export type OpenOptions = {
+  defaults?: Record<string, string>;
+};
+
+/** `openWith()` options. */
+export type OpenWithOptions = {
+  config: string;
+  passphrase: string;
   defaults?: Record<string, string>;
 };
 
@@ -145,7 +151,6 @@ export class Vsync {
   private readonly _env: string;
   private readonly _cfg: VsyncConfigSnapshot | null;
   private readonly _fetcher: S3Fetcher | null;
-  private materializer: AssetMaterializer | null = null;
   private closed = false;
 
   private constructor(args: {
@@ -173,7 +178,7 @@ export class Vsync {
   }
 
   /** Resolve `key` through vault → env → defaults → missing. */
-  get(key: string): string | null {
+  getEnv(key: string): string | null {
     this.assertOpen();
     const v = this.kv.get(key);
     if (v !== undefined) return v;
@@ -184,7 +189,7 @@ export class Vsync {
     return null;
   }
 
-  has(key: string): boolean {
+  hasEnv(key: string): boolean {
     this.assertOpen();
     return (
       this.kv.has(key) ||
@@ -193,7 +198,7 @@ export class Vsync {
     );
   }
 
-  source(key: string): Source {
+  envSource(key: string): Source {
     this.assertOpen();
     if (this.kv.has(key)) return "vault";
     if (Object.prototype.hasOwnProperty.call(process.env, key)) return "env";
@@ -202,7 +207,7 @@ export class Vsync {
   }
 
   /** Return asset bytes; never touches the filesystem. */
-  assetBytes(name: string): Uint8Array {
+  getAsContent(name: string): Uint8Array {
     this.assertOpen();
     const a = this.assets.get(name);
     if (a !== undefined) return a;
@@ -211,15 +216,6 @@ export class Vsync {
     throw new Error(
       `vsync: asset ${JSON.stringify(name)} not in vault (assets and kv both miss this name)`,
     );
-  }
-
-  /** Lazily materialize the asset to a 0600 tempfile; return its path. */
-  async assetPath(name: string): Promise<string> {
-    this.assertOpen();
-    if (this.materializer === null) {
-      this.materializer = new AssetMaterializer();
-    }
-    return this.materializer.materialize(name, this.assetBytes(name));
   }
 
   generation(): number {
@@ -262,10 +258,6 @@ export class Vsync {
     this.closed = true;
     this.kv.clear();
     this.assets.clear();
-    if (this.materializer !== null) {
-      this.materializer.close();
-      this.materializer = null;
-    }
   }
 
   // ─── Redaction-safe representation (v0.12 §12) ───────────────────────
@@ -440,14 +432,14 @@ async function streamToUint8Array(body: unknown): Promise<Uint8Array> {
 }
 
 /**
- * Read env, fetch from S3, decrypt, return a Vsync handle. One round
- * trip. No retries. No refresh. Restart the process to pick up a new
- * vault.
+ * Fetch, decrypt, and assemble the Vsync handle from a decoded config
+ * blob + passphrase. Shared by `open()` and `openWith()`.
  */
-export async function open(opts: OpenOptions = {}): Promise<Vsync> {
-  const { config, passphrase } = resolveBootstrapInputs();
-  const cfg = decodeConfigBlob(config);
-
+async function openFromCfg(
+  cfg: VsyncConfigSnapshot,
+  passphrase: string,
+  defaults: Map<string, string>,
+): Promise<Vsync> {
   const fetcher = injectedFetcher ?? defaultS3Fetcher;
   let fetched: S3FetchResult;
   try {
@@ -467,24 +459,58 @@ export async function open(opts: OpenOptions = {}): Promise<Vsync> {
     cfg.salt,
     cfg.iterations,
   );
-  const defaultsMap = new Map(Object.entries(opts.defaults ?? {}));
 
   return Vsync._fromDecrypted({
     plaintext,
     generation: fetched.generation,
     env: cfg.env,
-    defaults: defaultsMap,
+    defaults,
     cfg,
     fetcher,
   });
 }
 
+/**
+ * Read env, fetch from S3, decrypt, return a Vsync handle. One round
+ * trip. No retries. No refresh. Restart the process to pick up a new
+ * vault.
+ */
+export async function open(opts: OpenOptions = {}): Promise<Vsync> {
+  const { config, passphrase } = resolveBootstrapInputs();
+  const cfg = decodeConfigBlob(config);
+  const defaultsMap = new Map(Object.entries(opts.defaults ?? {}));
+  return openFromCfg(cfg, passphrase, defaultsMap);
+}
+
+/**
+ * Variant of `open()` that accepts the config blob and passphrase as
+ * strings directly — bypassing the `VSYNC_CONFIG` / `VSYNC_PASSPHRASE`
+ * env-var contract. Useful when bootstrap material lives in a custom
+ * secrets layer (KMS, Hashicorp Vault, a CI variable). Otherwise
+ * identical to `open()`.
+ */
+export async function openWith(opts: OpenWithOptions): Promise<Vsync> {
+  if (opts.config === "") {
+    throw new ConfigMissingError(
+      "vsync: openWith requires a non-empty config string",
+    );
+  }
+  if (opts.passphrase === "") {
+    throw new ConfigMissingError(
+      "vsync: openWith requires a non-empty passphrase string",
+    );
+  }
+  const cfg = decodeConfigBlob(Buffer.from(opts.config, "utf8"));
+  const defaultsMap = new Map(Object.entries(opts.defaults ?? {}));
+  return openFromCfg(cfg, opts.passphrase, defaultsMap);
+}
+
 // ─── Module-level convenience singleton ──────────────────────────────
 
 /** Convenience: lazily open() on first call, then look up `key`. */
-export async function get(key: string): Promise<string | null> {
+export async function getEnv(key: string): Promise<string | null> {
   if (singleton === null) {
     singleton = await open();
   }
-  return singleton.get(key);
+  return singleton.getEnv(key);
 }

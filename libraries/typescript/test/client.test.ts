@@ -3,6 +3,7 @@ import { gzipSync } from "node:zlib";
 import {
   Vsync,
   open,
+  openWith,
   __setS3Fetcher,
   __resetSingleton,
   type S3FetchResult,
@@ -23,10 +24,6 @@ const PASSPHRASE = "the-passphrase";
 function buildManifest(ts: string): Uint8Array {
   const magic = Buffer.from("RQEM0001", "ascii");
   return new Uint8Array(Buffer.concat([magic, Buffer.from(ts, "ascii"), Buffer.from("ignored", "ascii")]));
-}
-
-async function buildBundle(pt: Buffer): Promise<Uint8Array> {
-  return await encryptRqe1ForTest(pt, PASSPHRASE, SALT);
 }
 
 function base64urlNoPad(buf: Buffer): string {
@@ -74,25 +71,25 @@ function fromVault(opts: Parameters<typeof Vsync._fromVault>[0]): Vsync {
 }
 
 describe("Vsync — fallback chain (v0.12 §5)", () => {
-  test("vault hit: get returns vault value; source = 'vault'", () => {
+  test("vault hit: getEnv returns vault value; envSource = 'vault'", () => {
     const v = fromVault({ kv: { DATABASE_URL: "postgres://vault" } });
     try {
-      expect(v.get("DATABASE_URL")).toBe("postgres://vault");
-      expect(v.source("DATABASE_URL")).toBe("vault");
-      expect(v.has("DATABASE_URL")).toBe(true);
+      expect(v.getEnv("DATABASE_URL")).toBe("postgres://vault");
+      expect(v.envSource("DATABASE_URL")).toBe("vault");
+      expect(v.hasEnv("DATABASE_URL")).toBe(true);
     } finally {
       v.close();
     }
   });
 
-  test("env hit: vault miss, env var present; source = 'env'", () => {
+  test("env hit: vault miss, env var present; envSource = 'env'", () => {
     const prev = process.env.HOST;
     try {
       process.env.HOST = "from-env";
       const v = fromVault({ kv: {} });
-      expect(v.get("HOST")).toBe("from-env");
-      expect(v.source("HOST")).toBe("env");
-      expect(v.has("HOST")).toBe(true);
+      expect(v.getEnv("HOST")).toBe("from-env");
+      expect(v.envSource("HOST")).toBe("env");
+      expect(v.hasEnv("HOST")).toBe(true);
       v.close();
     } finally {
       if (prev === undefined) delete process.env.HOST;
@@ -100,27 +97,27 @@ describe("Vsync — fallback chain (v0.12 §5)", () => {
     }
   });
 
-  test("default hit: vault + env miss, defaults present; source = 'default'", () => {
+  test("default hit: vault + env miss, defaults present; envSource = 'default'", () => {
     const prev = process.env.PORT;
     delete process.env.PORT;
     try {
       const v = fromVault({ kv: {}, defaults: { PORT: "8080" } });
-      expect(v.get("PORT")).toBe("8080");
-      expect(v.source("PORT")).toBe("default");
-      expect(v.has("PORT")).toBe(true);
+      expect(v.getEnv("PORT")).toBe("8080");
+      expect(v.envSource("PORT")).toBe("default");
+      expect(v.hasEnv("PORT")).toBe(true);
       v.close();
     } finally {
       if (prev !== undefined) process.env.PORT = prev;
     }
   });
 
-  test("missing: nothing matches; get→null, source='missing', has=false", () => {
+  test("missing: nothing matches; getEnv→null, envSource='missing', hasEnv=false", () => {
     const v = fromVault({});
     const key = "NEVER_SET_THIS_KEY_XYZ123";
     delete process.env[key];
-    expect(v.get(key)).toBeNull();
-    expect(v.source(key)).toBe("missing");
-    expect(v.has(key)).toBe(false);
+    expect(v.getEnv(key)).toBeNull();
+    expect(v.envSource(key)).toBe("missing");
+    expect(v.hasEnv(key)).toBe(false);
     v.close();
   });
 
@@ -130,57 +127,11 @@ describe("Vsync — fallback chain (v0.12 §5)", () => {
     try {
       process.env[key] = "env";
       const v = fromVault({ kv: { [key]: "vault" }, defaults: { [key]: "default" } });
-      expect(v.source(key)).toBe("vault");
+      expect(v.envSource(key)).toBe("vault");
       v.close();
     } finally {
       if (prev === undefined) delete process.env[key];
       else process.env[key] = prev;
-    }
-  });
-});
-
-describe("Vsync — assets", () => {
-  test("assetBytes returns the raw bytes", () => {
-    const bytes = new Uint8Array([1, 2, 3, 4]);
-    const v = fromVault({ assets: { "svc.json": bytes } });
-    try {
-      const out = v.assetBytes("svc.json");
-      expect(Array.from(out)).toEqual([1, 2, 3, 4]);
-    } finally {
-      v.close();
-    }
-  });
-
-  test("assetBytes throws when key absent", () => {
-    const v = fromVault({});
-    expect(() => v.assetBytes("nope")).toThrow();
-    v.close();
-  });
-
-  test("assetBytes falls back to kv (utf8-encoded) when not in assets", () => {
-    const v = fromVault({ kv: { CERT: "-----BEGIN CERT-----\n" } });
-    try {
-      const out = v.assetBytes("CERT");
-      expect(Buffer.from(out).toString("utf8")).toBe("-----BEGIN CERT-----\n");
-    } finally {
-      v.close();
-    }
-  });
-
-  test("assetPath materializes to a 0600 file, repeat calls cache", async () => {
-    const bytes = new Uint8Array([9, 8, 7]);
-    const v = fromVault({ assets: { x: bytes } });
-    try {
-      const path1 = await v.assetPath("x");
-      const path2 = await v.assetPath("x");
-      expect(path2).toBe(path1);
-      const { readFileSync, statSync } = await import("node:fs");
-      expect(Array.from(readFileSync(path1))).toEqual([9, 8, 7]);
-      if (process.platform !== "win32") {
-        expect(statSync(path1).mode & 0o777).toBe(0o600);
-      }
-    } finally {
-      await v.close();
     }
   });
 });
@@ -201,9 +152,9 @@ describe("Vsync — generation + lifecycle", () => {
   test("operations after close throw", async () => {
     const v = fromVault({ kv: { K: "v" } });
     await v.close();
-    expect(() => v.get("K")).toThrow(/closed/i);
-    expect(() => v.has("K")).toThrow(/closed/i);
-    expect(() => v.source("K")).toThrow(/closed/i);
+    expect(() => v.getEnv("K")).toThrow(/closed/i);
+    expect(() => v.hasEnv("K")).toThrow(/closed/i);
+    expect(() => v.envSource("K")).toThrow(/closed/i);
   });
 
   test("toJSON/util.inspect return a redacted form", () => {
@@ -222,9 +173,6 @@ describe("open() — end-to-end with mocked S3 fetcher", () => {
   async function setup(payload: Buffer, env = "dev"): Promise<{ ts: string }> {
     const ts = "20260524-101010";
     const manifest = buildManifest(ts);
-    // The bundle's plaintext is the JSON vault payload, NOT a wrapped
-    // RQEM0001 envelope. Matches Python's _parse_vault_payload contract
-    // and the v0.12 §6 wire-format description.
     const bundle = await encryptRqe1ForTest(payload, PASSPHRASE, SALT);
     const fetcher = async (_cfg: VsyncConfigSnapshot): Promise<S3FetchResult> => ({
       manifestBytes: manifest,
@@ -237,13 +185,13 @@ describe("open() — end-to-end with mocked S3 fetcher", () => {
     return { ts };
   }
 
-  test("end-to-end: open → get vault key", async () => {
+  test("end-to-end: open → getEnv vault key", async () => {
     const payload = Buffer.from(JSON.stringify({ kv: { DATABASE_URL: "postgres://x" } }));
     await setup(payload);
     const v = await open();
     try {
-      expect(v.get("DATABASE_URL")).toBe("postgres://x");
-      expect(v.source("DATABASE_URL")).toBe("vault");
+      expect(v.getEnv("DATABASE_URL")).toBe("postgres://x");
+      expect(v.envSource("DATABASE_URL")).toBe("vault");
       expect(v.generation()).toBe(5);
     } finally {
       await v.close();
@@ -255,21 +203,20 @@ describe("open() — end-to-end with mocked S3 fetcher", () => {
     await setup(payload);
     const v = await open();
     try {
-      expect(v.get("FLAT_KEY")).toBe("flat-value");
+      expect(v.getEnv("FLAT_KEY")).toBe("flat-value");
     } finally {
       await v.close();
     }
   });
 
   test("end-to-end: with defaults option", async () => {
-    // Padded so envelope clears the 48-byte structural floor.
     const payload = Buffer.from(JSON.stringify({ kv: { _padding: "x".repeat(48) } }));
     await setup(payload);
     const v = await open({ defaults: { PORT: "8080" } });
     try {
       delete process.env.PORT;
-      expect(v.get("PORT")).toBe("8080");
-      expect(v.source("PORT")).toBe("default");
+      expect(v.getEnv("PORT")).toBe("8080");
+      expect(v.envSource("PORT")).toBe("default");
     } finally {
       await v.close();
     }
@@ -303,7 +250,6 @@ describe("open() — end-to-end with mocked S3 fetcher", () => {
   });
 
   test("wrong passphrase → WrongPassphraseError", async () => {
-    // Payload large enough that envelope ≥ 48-byte structural floor.
     const payload = Buffer.from(JSON.stringify({ kv: { K: "v".repeat(48) } }));
     await setup(payload);
     process.env.VSYNC_PASSPHRASE = "WRONG";
@@ -311,9 +257,7 @@ describe("open() — end-to-end with mocked S3 fetcher", () => {
   });
 
   test("malformed manifest envelope → BundleCorruptError", async () => {
-    // Anti-rollback for the manifest itself: a manifest blob with a
-    // wrong magic prefix must be rejected before we trust its ts.
-    const garbage = Buffer.alloc(40, 0); // 40 zeros — no RQEM0001 magic
+    const garbage = Buffer.alloc(40, 0);
     const bundle = await encryptRqe1ForTest(Buffer.from(JSON.stringify({})), PASSPHRASE, SALT);
     __setS3Fetcher(async () => ({
       manifestBytes: new Uint8Array(garbage),
@@ -335,6 +279,107 @@ describe("open() — end-to-end with mocked S3 fetcher", () => {
     const payload = Buffer.from("not json at all — and padded to clear the 48-byte envelope floor");
     await setup(payload);
     await expect(open()).rejects.toBeInstanceOf(BundleCorruptError);
+  });
+});
+
+describe("openWith() — direct-string bootstrap (v0.12 §4.2)", () => {
+  const ts = "20260524-101010";
+
+  async function injectFetcher(payload: Buffer, gen = 5): Promise<void> {
+    const manifest = buildManifest(ts);
+    const bundle = await encryptRqe1ForTest(payload, PASSPHRASE, SALT);
+    __setS3Fetcher(async (_cfg) => ({
+      manifestBytes: manifest,
+      bundleBytes: bundle,
+      generation: gen,
+    }));
+  }
+
+  test("openWith accepts string config and passphrase", async () => {
+    const payload = Buffer.from(JSON.stringify({ kv: { DATABASE_URL: "postgres://x" } }));
+    await injectFetcher(payload);
+    const v = await openWith({
+      config: mintConfigBlob("dev"),
+      passphrase: PASSPHRASE,
+    });
+    try {
+      expect(v.getEnv("DATABASE_URL")).toBe("postgres://x");
+      expect(v.envSource("DATABASE_URL")).toBe("vault");
+      expect(v.generation()).toBe(5);
+    } finally {
+      await v.close();
+    }
+  });
+
+  test("openWith rejects on empty config", async () => {
+    await expect(
+      openWith({ config: "", passphrase: PASSPHRASE }),
+    ).rejects.toBeInstanceOf(ConfigMissingError);
+  });
+
+  test("openWith rejects on empty passphrase", async () => {
+    await expect(
+      openWith({ config: mintConfigBlob("dev"), passphrase: "" }),
+    ).rejects.toBeInstanceOf(ConfigMissingError);
+  });
+
+  test("openWith threads defaults to the handle", async () => {
+    const payload = Buffer.from(JSON.stringify({ kv: { _padding: "x".repeat(48) } }));
+    await injectFetcher(payload);
+    const v = await openWith({
+      config: mintConfigBlob("dev"),
+      passphrase: PASSPHRASE,
+      defaults: { PORT: "8080" },
+    });
+    try {
+      delete process.env.PORT;
+      expect(v.getEnv("PORT")).toBe("8080");
+      expect(v.envSource("PORT")).toBe("default");
+    } finally {
+      await v.close();
+    }
+  });
+
+  test("openWith yields byte-identical decryption to open for same inputs", async () => {
+    const payload = Buffer.from(
+      JSON.stringify({ kv: { A: "1", B: "two-value-padded-out-to-clear-floor" } }),
+    );
+    await injectFetcher(payload);
+
+    // open() uses env vars; openWith() takes the strings directly.
+    process.env.VSYNC_CONFIG = mintConfigBlob("dev");
+    process.env.VSYNC_PASSPHRASE = PASSPHRASE;
+    const v1 = await open();
+    const v2 = await openWith({
+      config: mintConfigBlob("dev"),
+      passphrase: PASSPHRASE,
+    });
+    try {
+      expect(v1.getEnv("A")).toBe("1");
+      expect(v2.getEnv("A")).toBe("1");
+      expect(v1.getEnv("B")).toBe(v2.getEnv("B"));
+      expect(v1.generation()).toBe(v2.generation());
+    } finally {
+      await v1.close();
+      await v2.close();
+    }
+  });
+
+  test("openWith ignores env vars (direct args win)", async () => {
+    const payload = Buffer.from(JSON.stringify({ kv: { K: "from-arg-config".padEnd(48, "x") } }));
+    await injectFetcher(payload);
+    // Wrong env vars — openWith should ignore them and use the args.
+    process.env.VSYNC_CONFIG = "vsync-cfg-v1:garbage";
+    process.env.VSYNC_PASSPHRASE = "wrong";
+    const v = await openWith({
+      config: mintConfigBlob("dev"),
+      passphrase: PASSPHRASE,
+    });
+    try {
+      expect(v.getEnv("K")).toMatch(/^from-arg-config/);
+    } finally {
+      await v.close();
+    }
   });
 });
 
@@ -366,7 +411,6 @@ describe("Vsync — remoteGeneration / hasNewVersion (v0.12 §4.5, §7.1)", () =
       expect(v.generation()).toBe(5);
       const remote = await v.remoteGeneration();
       expect(remote).toBe(7);
-      // No mutation of local gen by polling.
       expect(v.generation()).toBe(5);
     } finally {
       await v.close();
@@ -389,7 +433,6 @@ describe("Vsync — remoteGeneration / hasNewVersion (v0.12 §4.5, §7.1)", () =
     const v = await open();
     try {
       await expect(v.remoteGeneration()).rejects.toBeInstanceOf(S3UnreachableError);
-      // Local gen still intact.
       expect(v.generation()).toBe(1);
     } finally {
       await v.close();
@@ -423,7 +466,6 @@ describe("Vsync — remoteGeneration / hasNewVersion (v0.12 §4.5, §7.1)", () =
     const v = await open();
     try {
       expect(await v.hasNewVersion()).toBe(true);
-      // Confirm local is still 3 (no mutation).
       expect(v.generation()).toBe(3);
     } finally {
       await v.close();

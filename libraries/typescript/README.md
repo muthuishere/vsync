@@ -24,12 +24,11 @@ import { open } from "@muthuishere/vsync-s3-client";
 
 const v = await open();
 try {
-  const dbUrl = v.get("DATABASE_URL");          // → string | null
-  const hasStripe = v.has("STRIPE_KEY");        // → boolean
-  const src = v.source("DATABASE_URL");         // → "vault" | "env" | "default" | "missing"
-  const saPath = await v.assetPath("svc.json"); // lazy 0600 tempfile
-  const saBytes = v.assetBytes("svc.json");     // Uint8Array, no filesystem
-  const gen = v.generation();                   // monotonic counter, safe to log
+  const dbUrl = v.getEnv("DATABASE_URL");          // → string | null
+  const hasStripe = v.hasEnv("STRIPE_KEY");        // → boolean
+  const src = v.envSource("DATABASE_URL");         // → "vault" | "env" | "default" | "missing"
+  const saBytes = v.getAsContent("svc.json");      // Uint8Array, in-memory always
+  const gen = v.generation();                      // monotonic counter, safe to log
 } finally {
   await v.close();
 }
@@ -41,11 +40,25 @@ Defaults are passed once at `open()`:
 const v = await open({ defaults: { PORT: "8080" } });
 ```
 
+When bootstrap material lives outside the `VSYNC_CONFIG` / `VSYNC_PASSPHRASE` env vars (KMS, Hashicorp Vault, a CI variable), use `openWith` with the strings directly:
+
+```typescript
+import { openWith } from "@muthuishere/vsync-s3-client";
+
+const v = await openWith({
+  config: await kms.fetch("vsync/config"),
+  passphrase: await kms.fetch("vsync/passphrase"),
+  defaults: { PORT: "8080" },
+});
+```
+
+`openWith` returns the same handle and behaves identically from then on. Empty `config` or empty `passphrase` raises `ConfigMissingError`.
+
 Scripts that only need one value can use the module-level singleton (opens lazily, cached for process lifetime):
 
 ```typescript
-import { get } from "@muthuishere/vsync-s3-client";
-console.log(await get("DATABASE_URL"));
+import { getEnv } from "@muthuishere/vsync-s3-client";
+console.log(await getEnv("DATABASE_URL"));
 ```
 
 Long-running apps should hold a `Vsync` handle explicitly so they control its lifecycle.
@@ -82,14 +95,14 @@ The library treats both shapes identically — pick one pattern per environment.
 
 ## Fallback chain
 
-`v.get(key)` resolves in exactly this order. No reordering, no per-key overrides:
+`v.getEnv(key)` resolves in exactly this order. No reordering, no per-key overrides:
 
-1. `vault[env][key]` — the decrypted bundle. `source = "vault"`.
-2. `process.env[key]` — at lookup time, not at open. `source = "env"`.
-3. `defaults[key]` — the dict passed at `open({ defaults: ... })`. `source = "default"`.
-4. missing — returns `null`. `source = "missing"`.
+1. `vault[env][key]` — the decrypted bundle. `envSource = "vault"`.
+2. `process.env[key]` — at lookup time, not at open. `envSource = "env"`.
+3. `defaults[key]` — the dict passed at `open({ defaults: ... })`. `envSource = "default"`.
+4. missing — returns `null`. `envSource = "missing"`.
 
-`has(key)` is true iff steps 1–3 resolve. `source(key)` returns the label of the winning step **without** returning the value — safe to log.
+`hasEnv(key)` is true iff steps 1–3 resolve. `envSource(key)` returns the label of the winning step **without** returning the value — safe to log.
 
 ## Errors
 
@@ -109,13 +122,28 @@ Switch on `error.code` (stable machine handle) or `error instanceof WrongPassphr
 
 `open()` does **not** silently degrade to env-vars-only when S3 is down — it throws `S3UnreachableError`. A process that booted with "env vars only because S3 was down" is harder to debug than one that refused to boot.
 
-## Asset materialization
+## Asset content
 
-`assetBytes(name)` is the default — never touches the filesystem, returns a `Uint8Array`. `assetPath(name)` (async) lazily writes to a per-handle tempdir (mode 0700) and returns a 0600 path, for SDKs that demand a filesystem path (GCP `GOOGLE_APPLICATION_CREDENTIALS`, OpenSSL cert paths, etc.). On Linux, `/dev/shm` (tmpfs) is preferred. `close()` removes the dir. **SIGKILL does not run `close()`** — file may leak until reboot. Documented honestly.
+`getAsContent(name)` returns the asset bytes as a `Uint8Array`. It never touches the filesystem and is synchronous — the bytes are decrypted into memory at `open()` time.
+
+There is **no `assetPath()` accessor.** SDKs that demand a filesystem path (GCP `GOOGLE_APPLICATION_CREDENTIALS`, OpenSSL cert files, JVM keystores) are easy to satisfy at the call site — three lines, with the operator in control of tmpdir, mode bits, and cleanup:
+
+```typescript
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+const dir = mkdtempSync(join(tmpdir(), "vsync-"));
+const path = join(dir, "gcp-sa.json");
+writeFileSync(path, v.getAsContent("gcp-sa.json"), { mode: 0o600 });
+process.env.GOOGLE_APPLICATION_CREDENTIALS = path;
+```
+
+Rationale (v0.12 §6): the library had no good default for tmpdir choice, mode bits, `/dev/shm` preference, or SIGKILL cleanup. Pushing materialization to the caller keeps the lib's contract minimal and the operator in control of lifecycle.
 
 ## Redaction
 
-`JSON.stringify(v)` and Node's `util.inspect(v)` return `<vsync:redacted gen=N env=<env>>`. Vault values never leak through serialization. `source(key)`, `has(key)`, and `generation()` are safe to log. `get(key)` and `assetBytes(name)` results are **never** safe to log.
+`JSON.stringify(v)` and Node's `util.inspect(v)` return `<vsync:redacted gen=N env=<env>>`. Vault values never leak through serialization. `envSource(key)`, `hasEnv(key)`, and `generation()` are safe to log. `getEnv(key)` and `getAsContent(name)` results are **never** safe to log.
 
 The library does not install global error handlers, monkey-patch `console.log`, or filter Sentry breadcrumbs. Application-level observability hygiene is the caller's job.
 
@@ -184,12 +212,11 @@ libraries/typescript/
 ├── README.md                       (you are here)
 ├── src/
 │   ├── index.ts                    public API re-exports
-│   ├── client.ts                   Vsync handle + open() / get()
+│   ├── client.ts                   Vsync handle + open() / openWith() / getEnv()
 │   ├── crypto.ts                   RQE1 decrypt
 │   ├── manifest.ts                 RQEM0001 read + pointer-seal verify
 │   ├── config-blob.ts              VSYNC_CONFIG decode (magic / base64url / gzip / JSON)
 │   ├── sources.ts                  two-input bootstrap resolution
-│   ├── assetpath.ts                lazy 0600 tempfile materialization
 │   └── errors.ts                   taxonomy
 └── test/
     ├── crypto.test.ts
@@ -197,7 +224,7 @@ libraries/typescript/
     ├── config-blob.test.ts
     ├── sources.test.ts
     ├── client.test.ts
-    ├── assetpath.test.ts
+    ├── get-as-content.test.ts
     ├── errors.test.ts
     └── conformance.test.ts
 ```
