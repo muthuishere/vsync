@@ -1,0 +1,76 @@
+version: '3'
+
+# Taskfile for libraries/java/ — vsync-s3-client Java port
+#
+# Build tool: Maven (mvn).
+#
+# Choice rationale: the brief preferred Gradle but `gradle` is not installed
+# on the target machine and a wrapper bootstrap needs a system gradle. Maven
+# is on PATH and works out of the box. The deliverable is the same (a JAR +
+# pom + sources/javadocs), and Maven Central publishing for libraries hosted
+# under github.com/<user>/ is standard with `central-publishing-maven-plugin`.
+#
+# Auth for publish:
+#   - Set up ~/.m2/settings.xml with a <server id="central"> token
+#     (Sonatype Central Portal → Generate User Token).
+#   - Have a GPG key imported locally; gpg-agent loaded.
+#   - Run `task publish` (activates the `release` profile in pom.xml).
+
+vars:
+  VERSION: "0.11.0"
+  COORDINATE: "io.github.muthuishere:vsync-s3-client"
+
+tasks:
+  default:
+    desc: List Java lib tasks
+    cmds:
+      - task -l --sort=alphanumeric
+    silent: true
+
+  test:
+    desc: Run the full JUnit suite (unit + conformance)
+    cmds:
+      - mvn test
+
+  test:conformance:
+    desc: Run only the cross-language conformance suite
+    cmds:
+      - mvn -Dtest='ConformanceTest' test
+
+  build:
+    desc: Compile + run tests + package the JAR (also produces sources + javadoc jars)
+    cmds:
+      - mvn package
+
+  clean:
+    desc: Remove target/ build output
+    cmds:
+      - mvn clean
+
+  check:
+    desc: Verify pom.xml version matches {{.VERSION}}
+    silent: true
+    cmds:
+      - |
+        ACTUAL=$(grep -m1 '<version>' pom.xml | sed 's/.*<version>\(.*\)<\/version>.*/\1/' | tr -d ' ')
+        if [ "$ACTUAL" != "{{.VERSION}}" ]; then
+          echo "✘ pom.xml version is $ACTUAL, expected {{.VERSION}}"
+          exit 1
+        fi
+        echo "✓ pom.xml version is {{.VERSION}}"
+
+  publish:dry-run:
+    desc: Build + install the JAR to ~/.m2 without uploading (smoke-test Central publishing config)
+    deps: [test, check]
+    cmds:
+      - mvn -Prelease install -DskipTests
+      - 'echo "✓ installed {{.COORDINATE}}:{{.VERSION}} to ~/.m2/repository"'
+
+  publish:
+    desc: Publish {{.COORDINATE}}:{{.VERSION}} to Maven Central (requires GPG key + central server token in ~/.m2/settings.xml)
+    deps: [test, check]
+    cmds:
+      - 'echo "Publishing {{.COORDINATE}}:{{.VERSION}} to Maven Central..."'
+      - 'echo "  Pre-flight: GPG key loaded? \`gpg --list-secret-keys\`"'
+      - 'echo "  Pre-flight: ~/.m2/settings.xml has <server id=\"central\"> token?"'
+      - mvn -Prelease deploy
