@@ -143,6 +143,8 @@ export class Vsync {
   private readonly defaults: Map<string, string>;
   private readonly _generation: number;
   private readonly _env: string;
+  private readonly _cfg: VsyncConfigSnapshot | null;
+  private readonly _fetcher: S3Fetcher | null;
   private materializer: AssetMaterializer | null = null;
   private closed = false;
 
@@ -152,12 +154,16 @@ export class Vsync {
     defaults: Map<string, string>;
     generation: number;
     env: string;
+    cfg?: VsyncConfigSnapshot | null;
+    fetcher?: S3Fetcher | null;
   }) {
     this.kv = args.kv;
     this.assets = args.assets;
     this.defaults = args.defaults;
     this._generation = args.generation;
     this._env = args.env;
+    this._cfg = args.cfg ?? null;
+    this._fetcher = args.fetcher ?? null;
   }
 
   private assertOpen(): void {
@@ -220,6 +226,37 @@ export class Vsync {
     return this._generation;
   }
 
+  /**
+   * Explicit-poll carve-out (v0.12 §4.5 / §7.1): one HEAD on the
+   * manifest, returns the remote `meta.gen` integer. Does NOT mutate
+   * `generation()`. Throws `S3UnreachableError` on network failure,
+   * `ManifestNotFoundError` on 404. Designed for healthcheck endpoints
+   * and sidecar crons — caller decides whether to trigger a restart.
+   */
+  async remoteGeneration(): Promise<number> {
+    this.assertOpen();
+    if (this._cfg === null || this._fetcher === null) {
+      throw new S3UnreachableError(
+        "vsync: remoteGeneration requires a handle opened via open() (no fetcher bound)",
+      );
+    }
+    let fetched: S3FetchResult;
+    try {
+      fetched = await this._fetcher(this._cfg);
+    } catch (e) {
+      if (e instanceof VSyncError) throw e;
+      throw new S3UnreachableError(
+        `vsync: remoteGeneration fetch failed: ${(e as Error).message ?? e}`,
+      );
+    }
+    return fetched.generation;
+  }
+
+  /** Convenience: remote gen > local gen. Same error propagation as `remoteGeneration`. */
+  async hasNewVersion(): Promise<boolean> {
+    return (await this.remoteGeneration()) > this._generation;
+  }
+
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
@@ -280,6 +317,8 @@ export class Vsync {
     generation: number;
     env: string;
     defaults: Map<string, string>;
+    cfg?: VsyncConfigSnapshot | null;
+    fetcher?: S3Fetcher | null;
   }): Vsync {
     const { kv, assets } = parseVaultPayload(args.plaintext);
     return new Vsync({
@@ -288,6 +327,8 @@ export class Vsync {
       defaults: args.defaults,
       generation: args.generation,
       env: args.env,
+      cfg: args.cfg ?? null,
+      fetcher: args.fetcher ?? null,
     });
   }
 }
@@ -433,6 +474,8 @@ export async function open(opts: OpenOptions = {}): Promise<Vsync> {
     generation: fetched.generation,
     env: cfg.env,
     defaults: defaultsMap,
+    cfg,
+    fetcher,
   });
 }
 

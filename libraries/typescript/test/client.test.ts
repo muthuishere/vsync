@@ -337,3 +337,118 @@ describe("open() — end-to-end with mocked S3 fetcher", () => {
     await expect(open()).rejects.toBeInstanceOf(BundleCorruptError);
   });
 });
+
+describe("Vsync — remoteGeneration / hasNewVersion (v0.12 §4.5, §7.1)", () => {
+  const ts = "20260524-101010";
+
+  async function buildFetcherSequence(
+    payload: Buffer,
+    gens: number[],
+  ): Promise<void> {
+    const manifest = buildManifest(ts);
+    const bundle = await encryptRqe1ForTest(payload, PASSPHRASE, SALT);
+    let call = 0;
+    const fetcher = async (_cfg: VsyncConfigSnapshot): Promise<S3FetchResult> => {
+      const gen = gens[Math.min(call, gens.length - 1)] ?? 0;
+      call += 1;
+      return { manifestBytes: manifest, bundleBytes: bundle, generation: gen };
+    };
+    __setS3Fetcher(fetcher);
+    process.env.VSYNC_CONFIG = mintConfigBlob("dev");
+    process.env.VSYNC_PASSPHRASE = PASSPHRASE;
+  }
+
+  test("remoteGeneration returns remote gen, leaves local untouched", async () => {
+    const payload = Buffer.from(JSON.stringify({ kv: { K: "v".repeat(48) } }));
+    await buildFetcherSequence(payload, [5, 7]);
+    const v = await open();
+    try {
+      expect(v.generation()).toBe(5);
+      const remote = await v.remoteGeneration();
+      expect(remote).toBe(7);
+      // No mutation of local gen by polling.
+      expect(v.generation()).toBe(5);
+    } finally {
+      await v.close();
+    }
+  });
+
+  test("remoteGeneration rejects with S3UnreachableError on network failure", async () => {
+    const payload = Buffer.from(JSON.stringify({ kv: { K: "v".repeat(48) } }));
+    const manifest = buildManifest(ts);
+    const bundle = await encryptRqe1ForTest(payload, PASSPHRASE, SALT);
+    let call = 0;
+    __setS3Fetcher(async (_cfg) => {
+      if (call++ === 0) {
+        return { manifestBytes: manifest, bundleBytes: bundle, generation: 1 };
+      }
+      throw new S3UnreachableError("simulated network");
+    });
+    process.env.VSYNC_CONFIG = mintConfigBlob("dev");
+    process.env.VSYNC_PASSPHRASE = PASSPHRASE;
+    const v = await open();
+    try {
+      await expect(v.remoteGeneration()).rejects.toBeInstanceOf(S3UnreachableError);
+      // Local gen still intact.
+      expect(v.generation()).toBe(1);
+    } finally {
+      await v.close();
+    }
+  });
+
+  test("remoteGeneration rejects with ManifestNotFoundError on 404", async () => {
+    const payload = Buffer.from(JSON.stringify({ kv: { K: "v".repeat(48) } }));
+    const manifest = buildManifest(ts);
+    const bundle = await encryptRqe1ForTest(payload, PASSPHRASE, SALT);
+    let call = 0;
+    __setS3Fetcher(async (_cfg) => {
+      if (call++ === 0) {
+        return { manifestBytes: manifest, bundleBytes: bundle, generation: 1 };
+      }
+      throw new ManifestNotFoundError("simulated 404");
+    });
+    process.env.VSYNC_CONFIG = mintConfigBlob("dev");
+    process.env.VSYNC_PASSPHRASE = PASSPHRASE;
+    const v = await open();
+    try {
+      await expect(v.remoteGeneration()).rejects.toBeInstanceOf(ManifestNotFoundError);
+    } finally {
+      await v.close();
+    }
+  });
+
+  test("hasNewVersion is true when local is behind", async () => {
+    const payload = Buffer.from(JSON.stringify({ kv: { K: "v".repeat(48) } }));
+    await buildFetcherSequence(payload, [3, 4]);
+    const v = await open();
+    try {
+      expect(await v.hasNewVersion()).toBe(true);
+      // Confirm local is still 3 (no mutation).
+      expect(v.generation()).toBe(3);
+    } finally {
+      await v.close();
+    }
+  });
+
+  test("hasNewVersion is false when local is current", async () => {
+    const payload = Buffer.from(JSON.stringify({ kv: { K: "v".repeat(48) } }));
+    await buildFetcherSequence(payload, [5, 5]);
+    const v = await open();
+    try {
+      expect(await v.hasNewVersion()).toBe(false);
+    } finally {
+      await v.close();
+    }
+  });
+
+  test("hasNewVersion is false when local is ahead", async () => {
+    const payload = Buffer.from(JSON.stringify({ kv: { K: "v".repeat(48) } }));
+    await buildFetcherSequence(payload, [10, 8]);
+    const v = await open();
+    try {
+      expect(await v.hasNewVersion()).toBe(false);
+    } finally {
+      await v.close();
+    }
+  });
+});
