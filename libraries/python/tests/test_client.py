@@ -13,9 +13,7 @@ import os
 
 import pytest
 
-import builtins
-
-from vsync_s3_client import Vsync, get
+from vsync_s3_client import Vsync, get_env, open_with
 from vsync_s3_client import open as vsync_open
 from vsync_s3_client.client import (
     _kdf_salt,
@@ -36,75 +34,38 @@ from vsync_s3_client.exceptions import (
 # ─── Fallback chain (v0.12 §5) ─────────────────────────────────────────
 
 
-def test_get_vault_wins_over_env(monkeypatch):
+def test_get_env_vault_wins_over_env(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgres://env")
     v = Vsync._from_vault(kv={"DATABASE_URL": "postgres://vault"})
-    assert v.get("DATABASE_URL") == "postgres://vault"
-    assert v.source("DATABASE_URL") == "vault"
-    assert v.has("DATABASE_URL") is True
+    assert v.get_env("DATABASE_URL") == "postgres://vault"
+    assert v.env_source("DATABASE_URL") == "vault"
+    assert v.has_env("DATABASE_URL") is True
 
 
-def test_get_env_wins_when_vault_misses(monkeypatch):
+def test_get_env_env_wins_when_vault_misses(monkeypatch):
     monkeypatch.setenv("STRIPE_KEY", "sk_live_env")
     v = Vsync._from_vault(kv={}, defaults={"STRIPE_KEY": "sk_test_default"})
-    assert v.get("STRIPE_KEY") == "sk_live_env"
-    assert v.source("STRIPE_KEY") == "env"
+    assert v.get_env("STRIPE_KEY") == "sk_live_env"
+    assert v.env_source("STRIPE_KEY") == "env"
 
 
-def test_get_defaults_when_vault_and_env_miss():
+def test_get_env_defaults_when_vault_and_env_miss():
     v = Vsync._from_vault(kv={}, defaults={"PORT": "8080"})
-    # Make sure PORT isn't already in env on this machine.
     os.environ.pop("PORT", None)
-    assert v.get("PORT") == "8080"
-    assert v.source("PORT") == "default"
-    assert v.has("PORT") is True
+    assert v.get_env("PORT") == "8080"
+    assert v.env_source("PORT") == "default"
+    assert v.has_env("PORT") is True
 
 
-def test_get_missing_returns_none():
+def test_get_env_missing_returns_none():
     v = Vsync._from_vault(kv={"OTHER": "x"})
     os.environ.pop("DATABASE_URL", None)
-    assert v.get("DATABASE_URL") is None
-    assert v.source("DATABASE_URL") == "missing"
-    assert v.has("DATABASE_URL") is False
+    assert v.get_env("DATABASE_URL") is None
+    assert v.env_source("DATABASE_URL") == "missing"
+    assert v.has_env("DATABASE_URL") is False
 
 
-# ─── Assets (v0.12 §6) ─────────────────────────────────────────────────
-
-
-def test_asset_bytes():
-    v = Vsync._from_vault(assets={"svc.json": b'{"k":"v"}'})
-    assert v.asset_bytes("svc.json") == b'{"k":"v"}'
-
-
-def test_asset_path_materializes_to_0600(tmp_path):
-    v = Vsync._from_vault(assets={"svc.json": b"data"})
-    try:
-        path = v.asset_path("svc.json")
-        with open(path, "rb") as f:
-            assert f.read() == b"data"
-        mode = os.stat(path).st_mode & 0o777
-        assert mode == 0o600
-    finally:
-        v.close()
-
-
-def test_asset_path_repeat_returns_same_path():
-    v = Vsync._from_vault(assets={"svc.json": b"data"})
-    try:
-        p1 = v.asset_path("svc.json")
-        p2 = v.asset_path("svc.json")
-        assert p1 == p2
-    finally:
-        v.close()
-
-
-def test_close_removes_asset_tempdir():
-    v = Vsync._from_vault(assets={"svc.json": b"data"})
-    path = v.asset_path("svc.json")
-    parent = os.path.dirname(path)
-    assert os.path.isdir(parent)
-    v.close()
-    assert not os.path.exists(parent)
+# ─── Lifecycle ─────────────────────────────────────────────────────────
 
 
 def test_close_is_idempotent():
@@ -113,18 +74,18 @@ def test_close_is_idempotent():
     v.close()
 
 
-def test_get_after_close_raises():
+def test_get_env_after_close_raises():
     v = Vsync._from_vault(kv={"X": "y"})
     v.close()
     with pytest.raises(ValueError):
-        v.get("X")
+        v.get_env("X")
 
 
 def test_context_manager():
     with Vsync._from_vault(kv={"X": "y"}) as v:
-        assert v.get("X") == "y"
+        assert v.get_env("X") == "y"
     with pytest.raises(ValueError):
-        v.get("X")
+        v.get_env("X")
 
 
 # ─── Generation ────────────────────────────────────────────────────────
@@ -178,10 +139,6 @@ def test_parse_vault_rejects_int_kv_value():
 
 
 # ─── Salt pass-through (v0.12 §2.1, Convention A — locked at bc52f51) ──
-#
-# The salt string is fed verbatim to PBKDF2 as UTF-8 bytes. No base64
-# decode. Validation is on the string's char length, not on decoded
-# bytes. Matches `src/crypto.ts::deriveKey` exactly.
 
 
 def _cfg(**overrides):
@@ -195,7 +152,7 @@ def _cfg(**overrides):
         secret_access_key="s",
         prefix="p/",
         env="test",
-        salt="AAAAAAAAAAAAAAAAAAAAAA==",  # 24 chars — matches CLI default
+        salt="AAAAAAAAAAAAAAAAAAAAAA==",
         iterations=600000,
     )
     base.update(overrides)
@@ -203,9 +160,6 @@ def _cfg(**overrides):
 
 
 def test_kdf_salt_returns_string_verbatim():
-    # Convention A: the salt is returned as-is (str), no decode. The
-    # caller (crypto._derive_key) utf-8-encodes it before feeding PBKDF2 —
-    # byte-identical to what src/crypto.ts::deriveKey does on encrypt.
     salt = "AAAAAAAAAAAAAAAAAAAAAA=="
     cfg = _cfg(salt=salt)
     assert _kdf_salt(cfg) == salt
@@ -213,7 +167,6 @@ def test_kdf_salt_returns_string_verbatim():
 
 
 def test_kdf_salt_short_string_raises_config_unsupported_version():
-    # 15-char salt — one below the 16-char sanity floor.
     cfg = _cfg(salt="A" * 15)
     with pytest.raises(ConfigUnsupportedVersionError):
         _kdf_salt(cfg)
@@ -225,15 +178,11 @@ def test_kdf_salt_exactly_16_chars_accepted():
 
 
 def test_kdf_salt_24_char_cli_default_accepted():
-    # Mirrors the CLI's actual on-disk salt shape (24-char base64 ASCII).
     cfg = _cfg(salt="AAAAAAAAAAAAAAAAAAAAAA==")
     assert _kdf_salt(cfg) == "AAAAAAAAAAAAAAAAAAAAAA=="
 
 
 def test_kdf_salt_non_base64_string_still_accepted():
-    # The string is opaque to the lib — any sequence of ≥ 16 chars is
-    # valid. The CLI's writer side defines what the actual content looks
-    # like; the lib just passes through.
     cfg = _cfg(salt="not-base64-but-long-enough-to-pass")
     assert _kdf_salt(cfg) == "not-base64-but-long-enough-to-pass"
 
@@ -253,10 +202,6 @@ def test_kdf_salt_iterations_negative_raises_config_unsupported_version():
 # ─── open() with mocked fetcher ────────────────────────────────────────
 
 
-# Convention A: the salt is an opaque string fed verbatim to PBKDF2 as
-# utf-8 bytes. Match what `src/crypto.ts::deriveKey` does — encode("utf-8")
-# of the string. The test salt below is a real-shaped 24-char base64 ASCII
-# string (matches the CLI's actual on-disk format).
 _TEST_SALT_STR = "AAAAAAAAAAAAAAAAAAAAAA=="
 
 
@@ -285,8 +230,6 @@ def _make_config_blob():
 def test_open_uses_injected_fetcher(monkeypatch):
     from vsync_s3_client.crypto import encrypt_rqe1_for_test
 
-    # Encrypt with the salt STRING (not decoded bytes) — matches what
-    # _kdf_salt(cfg) now returns and what src/crypto.ts::deriveKey does.
     salt = _TEST_SALT_STR
     passphrase = "the-passphrase"
     vault_json = json.dumps({"DATABASE_URL": "postgres://from-vault"}).encode()
@@ -302,7 +245,7 @@ def test_open_uses_injected_fetcher(monkeypatch):
         monkeypatch.setenv("VSYNC_PASSPHRASE", passphrase)
         v = vsync_open()
         try:
-            assert v.get("DATABASE_URL") == "postgres://from-vault"
+            assert v.get_env("DATABASE_URL") == "postgres://from-vault"
             assert v.generation() == 7
         finally:
             v.close()
@@ -317,7 +260,7 @@ def test_open_missing_env_raises_config_missing(monkeypatch):
         vsync_open()
 
 
-def test_module_level_get_uses_singleton(monkeypatch):
+def test_module_level_get_env_uses_singleton(monkeypatch):
     from vsync_s3_client.crypto import encrypt_rqe1_for_test
 
     salt = _TEST_SALT_STR
@@ -334,10 +277,8 @@ def test_module_level_get_uses_singleton(monkeypatch):
     try:
         monkeypatch.setenv("VSYNC_CONFIG", _make_config_blob())
         monkeypatch.setenv("VSYNC_PASSPHRASE", passphrase)
-        assert get("X") == "from-vault"
-        # Second call must not re-open (the fetcher would be called again
-        # and that's wasteful — singleton holds state).
-        assert get("X") == "from-vault"
+        assert get_env("X") == "from-vault"
+        assert get_env("X") == "from-vault"
     finally:
         _reset_singleton()
         _set_s3_fetcher(None)
@@ -350,31 +291,19 @@ def test_runtime_roundtrip_against_cli_salt_format(monkeypatch):
     `salt` is a 24-char ASCII string written verbatim into the blob
     (Convention A; NO base64 wrap on the wire). The runtime lib MUST
     feed those 24 utf-8 bytes to PBKDF2, byte-identical to what
-    `src/crypto.ts::deriveKey` does on encrypt. A previous Convention-B
-    misread would base64-decode this 24-char string into 16 raw bytes
-    → different PBKDF2 input → different key → decryption fails.
-
-    This test bypasses the conformance loader (which doesn't exercise
-    `_kdf_salt`) and drives `open()` end-to-end so the production code
-    path is the one under test.
+    `src/crypto.ts::deriveKey` does on encrypt.
     """
     from vsync_s3_client.crypto import encrypt_rqe1_for_test
     import base64
     import gzip
 
-    # Real-shaped 24-char base64 ASCII salt — what runtime-token emits.
     cli_salt = "20ZiDJFKLLkDsDUiWSMn3g=="
     passphrase = "test-passphrase"
 
-    # Encrypt as the CLI would: salt string → utf-8 bytes → PBKDF2.
-    # The `str` branch of `_derive_key` does exactly this; we pass the
-    # string here to mirror src/crypto.ts.
     plaintext = b'{"HELLO":"world"}'
     bundle = encrypt_rqe1_for_test(plaintext, passphrase, cli_salt)
     manifest = b"RQEM0001" + b"20260601-000000" + b"meta"
 
-    # Build a blob whose `salt` field is the cli_salt VERBATIM (no wrap),
-    # matching bin/runtime-token.ts at bc52f51.
     inner = json.dumps(
         {
             "v": 1,
@@ -394,7 +323,6 @@ def test_runtime_roundtrip_against_cli_salt_format(monkeypatch):
     config_blob = f"vsync-cfg-v1:{b64}"
 
     def fetcher(cfg):
-        # Belt-and-braces: also confirm the lib parsed salt verbatim.
         assert cfg.salt == cli_salt, (
             f"runtime path saw salt {cfg.salt!r}, expected {cli_salt!r} — "
             "the lib must NOT transform the wire salt field"
@@ -406,19 +334,12 @@ def test_runtime_roundtrip_against_cli_salt_format(monkeypatch):
         monkeypatch.setenv("VSYNC_CONFIG", config_blob)
         monkeypatch.setenv("VSYNC_PASSPHRASE", passphrase)
         with vsync_open() as v:
-            assert v.get("HELLO") == "world"
+            assert v.get_env("HELLO") == "world"
     finally:
         _set_s3_fetcher(None)
 
 
 def test_kdf_salt_returns_24_char_cli_salt_unchanged():
-    """Convention-A regression guard at the salt-extraction boundary.
-
-    The exact byte sequence runtime-token emits — 24-char base64 ASCII —
-    must come out of `_kdf_salt` as the same Python `str`, not as 16
-    base64-decoded raw bytes. Independent of the round-trip test above
-    so a regression here pinpoints `_kdf_salt` directly.
-    """
     cli_salt = "20ZiDJFKLLkDsDUiWSMn3g=="
     cfg = _cfg(salt=cli_salt)
     result = _kdf_salt(cfg)
@@ -430,32 +351,185 @@ def test_kdf_salt_returns_24_char_cli_salt_unchanged():
     assert len(result) == 24, "the 24-char wire shape must round-trip verbatim"
 
 
-# ─── remote_generation / has_new_version (v0.12 §4.1, §7.1) ────────────
+# ─── open_with — direct-config open path (v0.12 §4.1, §4.5) ────────────
 #
-# The pull-once rule (§7) covers the BUNDLE — the decrypted vault stays in
-# memory and never refreshes. The carve-out is the explicit poll for the
-# remote manifest's gen counter: callers (healthcheck endpoints, sidecar
-# crons) ask "is upstream newer than what I opened with?" and decide
-# whether to trigger a restart. The local `generation()` is NEVER mutated
-# by polling — that's the whole point of the carve-out.
+# open_with(config, passphrase, defaults=None) accepts the two bootstrap
+# strings directly instead of reading them from the env. Same handle,
+# same behavior from there on. Aimed at callers that fetch their
+# bootstrap from KMS / Vault / a custom secrets layer rather than from
+# the process environment.
+
+
+def test_open_with_accepts_string_config_and_passphrase(monkeypatch):
+    """Happy path: pass the config blob string + passphrase string directly,
+    return a working Vsync handle."""
+    from vsync_s3_client.crypto import encrypt_rqe1_for_test
+
+    salt = _TEST_SALT_STR
+    passphrase = "direct-passphrase"
+    vault_json = json.dumps({"K": "from-direct"}).encode()
+    bundle = encrypt_rqe1_for_test(vault_json, passphrase, salt)
+    manifest = b"RQEM0001" + b"20260601-000000" + b"meta"
+
+    def fetcher(cfg):
+        return manifest, bundle, 11
+
+    _set_s3_fetcher(fetcher)
+    try:
+        # No env vars set — open_with takes the strings directly.
+        for var in ("VSYNC_CONFIG", "VSYNC_CONFIG_FILE", "VSYNC_PASSPHRASE", "VSYNC_PASSPHRASE_FILE"):
+            monkeypatch.delenv(var, raising=False)
+        v = open_with(config=_make_config_blob(), passphrase=passphrase)
+        try:
+            assert v.get_env("K") == "from-direct"
+            assert v.generation() == 11
+        finally:
+            v.close()
+    finally:
+        _set_s3_fetcher(None)
+
+
+def test_open_with_raises_on_empty_config(monkeypatch):
+    """Empty config string → ConfigMissingError (same validation as open())."""
+    for var in ("VSYNC_CONFIG", "VSYNC_CONFIG_FILE", "VSYNC_PASSPHRASE", "VSYNC_PASSPHRASE_FILE"):
+        monkeypatch.delenv(var, raising=False)
+    with pytest.raises(ConfigMissingError):
+        open_with(config="", passphrase="pp")
+
+
+def test_open_with_raises_on_none_config(monkeypatch):
+    """None config → ConfigMissingError."""
+    for var in ("VSYNC_CONFIG", "VSYNC_CONFIG_FILE", "VSYNC_PASSPHRASE", "VSYNC_PASSPHRASE_FILE"):
+        monkeypatch.delenv(var, raising=False)
+    with pytest.raises(ConfigMissingError):
+        open_with(config=None, passphrase="pp")  # type: ignore[arg-type]
+
+
+def test_open_with_raises_on_empty_passphrase(monkeypatch):
+    """Empty passphrase string → ConfigMissingError."""
+    for var in ("VSYNC_CONFIG", "VSYNC_CONFIG_FILE", "VSYNC_PASSPHRASE", "VSYNC_PASSPHRASE_FILE"):
+        monkeypatch.delenv(var, raising=False)
+    with pytest.raises(ConfigMissingError):
+        open_with(config=_make_config_blob(), passphrase="")
+
+
+def test_open_with_raises_on_none_passphrase(monkeypatch):
+    """None passphrase → ConfigMissingError."""
+    for var in ("VSYNC_CONFIG", "VSYNC_CONFIG_FILE", "VSYNC_PASSPHRASE", "VSYNC_PASSPHRASE_FILE"):
+        monkeypatch.delenv(var, raising=False)
+    with pytest.raises(ConfigMissingError):
+        open_with(config=_make_config_blob(), passphrase=None)  # type: ignore[arg-type]
+
+
+def test_open_with_threads_defaults_to_handle(monkeypatch):
+    """defaults={...} kwarg flows through to the handle's fallback chain."""
+    from vsync_s3_client.crypto import encrypt_rqe1_for_test
+
+    passphrase = "pp"
+    vault_json = json.dumps({}).encode()  # empty vault — defaults win
+    bundle = encrypt_rqe1_for_test(vault_json, passphrase, _TEST_SALT_STR)
+    manifest = b"RQEM0001" + b"20260601-000000" + b"meta"
+
+    def fetcher(cfg):
+        return manifest, bundle, 0
+
+    _set_s3_fetcher(fetcher)
+    try:
+        for var in ("VSYNC_CONFIG", "VSYNC_CONFIG_FILE", "VSYNC_PASSPHRASE", "VSYNC_PASSPHRASE_FILE", "PORT"):
+            monkeypatch.delenv(var, raising=False)
+        v = open_with(
+            config=_make_config_blob(),
+            passphrase=passphrase,
+            defaults={"PORT": "8080"},
+        )
+        try:
+            assert v.get_env("PORT") == "8080"
+            assert v.env_source("PORT") == "default"
+        finally:
+            v.close()
+    finally:
+        _set_s3_fetcher(None)
+
+
+def test_open_with_returns_same_handle_shape_as_open(monkeypatch):
+    """Both paths return a Vsync — same instance type, same methods."""
+    from vsync_s3_client.crypto import encrypt_rqe1_for_test
+
+    passphrase = "pp"
+    vault_json = json.dumps({"X": "y"}).encode()
+    bundle = encrypt_rqe1_for_test(vault_json, passphrase, _TEST_SALT_STR)
+    manifest = b"RQEM0001" + b"20260601-000000" + b"meta"
+
+    def fetcher(cfg):
+        return manifest, bundle, 0
+
+    _set_s3_fetcher(fetcher)
+    try:
+        monkeypatch.setenv("VSYNC_CONFIG", _make_config_blob())
+        monkeypatch.setenv("VSYNC_PASSPHRASE", passphrase)
+        v_open = vsync_open()
+        v_open_with = open_with(config=_make_config_blob(), passphrase=passphrase)
+        try:
+            assert type(v_open) is type(v_open_with)
+            assert isinstance(v_open_with, Vsync)
+            for method in (
+                "get_env", "has_env", "env_source", "get_as_content",
+                "generation", "remote_generation", "has_new_version", "close",
+            ):
+                assert hasattr(v_open_with, method)
+                assert callable(getattr(v_open_with, method))
+        finally:
+            v_open.close()
+            v_open_with.close()
+    finally:
+        _set_s3_fetcher(None)
+
+
+def test_open_with_yields_byte_identical_decryption_as_open_for_same_inputs(monkeypatch):
+    """Load-bearing parity: the same (config, passphrase) decrypts to the same
+    bytes whether read from env via open() or passed via open_with()."""
+    from vsync_s3_client.crypto import encrypt_rqe1_for_test
+
+    passphrase = "parity-pp"
+    plaintext = json.dumps({"A": "alpha", "B": "beta"}).encode()
+    bundle = encrypt_rqe1_for_test(plaintext, passphrase, _TEST_SALT_STR)
+    manifest = b"RQEM0001" + b"20260601-000000" + b"meta"
+
+    def fetcher(cfg):
+        return manifest, bundle, 42
+
+    _set_s3_fetcher(fetcher)
+    try:
+        config_blob = _make_config_blob()
+        monkeypatch.setenv("VSYNC_CONFIG", config_blob)
+        monkeypatch.setenv("VSYNC_PASSPHRASE", passphrase)
+        v_env = vsync_open()
+        # Clear env so open_with isn't accidentally picking up anything.
+        for var in ("VSYNC_CONFIG", "VSYNC_PASSPHRASE"):
+            monkeypatch.delenv(var, raising=False)
+        v_direct = open_with(config=config_blob, passphrase=passphrase)
+        try:
+            for k in ("A", "B"):
+                assert v_env.get_env(k) == v_direct.get_env(k)
+            assert v_env.generation() == v_direct.generation() == 42
+        finally:
+            v_env.close()
+            v_direct.close()
+    finally:
+        _set_s3_fetcher(None)
+
+
+# ─── remote_generation / has_new_version (v0.12 §4.1, §7.1) ────────────
 
 
 def _open_with_fetcher(monkeypatch, fetcher, passphrase="pp", payload_kv=None):
-    """Helper: drive open() through an injected fetcher and return the handle.
-
-    The fetcher must yield a valid bundle for at least the first call —
-    open() decrypts it. Subsequent calls can return anything the test
-    needs (different gen, raise, etc.) — remote_generation() exercises
-    only the gen field.
-    """
+    """Helper: drive open() through an injected fetcher and return the handle."""
     from vsync_s3_client.crypto import encrypt_rqe1_for_test
 
     salt = _TEST_SALT_STR
     vault_json = json.dumps(payload_kv or {"X": "y"}).encode()
     bundle = encrypt_rqe1_for_test(vault_json, passphrase, salt)
     manifest = b"RQEM0001" + b"20260601-000000" + b"meta"
-    # Tests that want to mutate the gen across calls hook into this via
-    # the `fetcher` they pass in; this helper just installs it.
     _set_s3_fetcher(fetcher(manifest, bundle))
     monkeypatch.setenv("VSYNC_CONFIG", _make_config_blob())
     monkeypatch.setenv("VSYNC_PASSPHRASE", passphrase)
@@ -463,15 +537,11 @@ def _open_with_fetcher(monkeypatch, fetcher, passphrase="pp", payload_kv=None):
 
 
 def test_remote_generation_returns_remote_gen(monkeypatch):
-    """Local gen captured at open; remote_generation() returns the fresh
-    fetcher value. Local gen is NOT mutated by polling.
-    """
     calls = {"n": 0}
 
     def make_fetcher(manifest, bundle):
         def fetcher(cfg):
             calls["n"] += 1
-            # First call (open) → gen=5; later calls → gen=7.
             gen = 5 if calls["n"] == 1 else 7
             return manifest, bundle, gen
         return fetcher
@@ -482,8 +552,6 @@ def test_remote_generation_returns_remote_gen(monkeypatch):
         try:
             assert v.generation() == 5
             assert v.remote_generation() == 7
-            # Local gen must NOT mutate — this is the load-bearing
-            # invariant from spec §7.1.
             assert v.generation() == 5
         finally:
             v.close()
@@ -492,7 +560,6 @@ def test_remote_generation_returns_remote_gen(monkeypatch):
 
 
 def test_remote_generation_raises_on_network_failure(monkeypatch):
-    """S3UnreachableError from the fetcher propagates verbatim."""
     state = {"open_done": False}
 
     def make_fetcher(manifest, bundle):
@@ -516,7 +583,6 @@ def test_remote_generation_raises_on_network_failure(monkeypatch):
 
 
 def test_remote_generation_raises_on_manifest_404(monkeypatch):
-    """ManifestNotFoundError from the fetcher propagates verbatim."""
     state = {"open_done": False}
 
     def make_fetcher(manifest, bundle):
@@ -540,7 +606,6 @@ def test_remote_generation_raises_on_manifest_404(monkeypatch):
 
 
 def test_has_new_version_when_local_is_behind(monkeypatch):
-    """local=3, remote=4 → True."""
     calls = {"n": 0}
 
     def make_fetcher(manifest, bundle):
@@ -561,7 +626,6 @@ def test_has_new_version_when_local_is_behind(monkeypatch):
 
 
 def test_has_new_version_when_local_is_current(monkeypatch):
-    """local=5, remote=5 → False (strictly greater)."""
     def make_fetcher(manifest, bundle):
         def fetcher(cfg):
             return manifest, bundle, 5
@@ -579,7 +643,6 @@ def test_has_new_version_when_local_is_current(monkeypatch):
 
 
 def test_has_new_version_when_local_is_ahead(monkeypatch):
-    """local=10, remote=8 (shouldn't happen, guard anyway) → False."""
     calls = {"n": 0}
 
     def make_fetcher(manifest, bundle):

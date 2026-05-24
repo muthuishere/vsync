@@ -177,49 +177,32 @@ def _run_fallback_chain(v: Vector, monkeypatch) -> None:
     handle = Vsync._from_vault(kv=vault, defaults=defaults)
     try:
         for q, want in zip(queries, expected_results):
-            assert handle.get(q) == want["value"], f"{v}: get({q!r})"
-            assert handle.source(q) == want["source"], f"{v}: source({q!r})"
-            assert handle.has(q) == want["has"], f"{v}: has({q!r})"
+            assert handle.get_env(q) == want["value"], f"{v}: get_env({q!r})"
+            assert handle.env_source(q) == want["source"], f"{v}: env_source({q!r})"
+            assert handle.has_env(q) == want["has"], f"{v}: has_env({q!r})"
     finally:
         handle.close()
 
 
 def _run_asset_path(v: Vector) -> None:
+    """Bytes-only assertion per v0.12: get_as_content(name) returns the
+    expected bytes. The corpus's `asset-path` category name is internal —
+    what matters is bytes parity. The mode_octal field is ignored (no
+    tempfile materialization in the lib anymore — operators write their
+    own if their SDK needs a path).
+    """
     expected = v.meta["expected"]
     inputs = v.meta["inputs"]
     key = inputs["key"]
     assert v.bin_bytes is not None, f"{v}: asset bytes (.bin) required"
-    # The vault JSON references the binary via a placeholder; the source of
-    # truth is the .bin file. Inject it as an asset.
     handle = Vsync._from_vault(assets={key: v.bin_bytes})
     try:
-        bytes_back = handle.asset_bytes(key)
-        assert bytes_back.hex() == expected["bytes_hex"], (
-            f"{v}: assetBytes mismatch"
+        bytes_back = handle.get_as_content(key)
+        assert bytes_back == bytes.fromhex(expected["bytes_hex"]), (
+            f"{v}: get_as_content bytes mismatch"
         )
-        path = handle.asset_path(key)
-        import os as _os
-        import stat as _stat
-        # File contents match.
-        with builtins_open_bytes(path) as f:
-            assert f.read() == v.bin_bytes
-        # Mode matches.
-        mode = _stat.S_IMODE(_os.stat(path).st_mode)
-        assert oct(mode) == "0o" + expected["mode_octal"].lstrip("0").rjust(3, "0") or (
-            f"{mode:#o}" == expected["mode_octal"]
-            or f"0o{int(expected['mode_octal'], 8):o}" == oct(mode)
-        ), f"{v}: mode mismatch — got {oct(mode)}, want {expected['mode_octal']}"
     finally:
         handle.close()
-        # close() must have unlinked the tempdir.
-        import os as _os2
-        assert not _os2.path.exists(path), f"{v}: tempdir not cleaned up"
-
-
-def builtins_open_bytes(path: str):
-    """Tiny shim so we don't shadow `open` (which collides with vsync_s3_client.open)."""
-    import io
-    return io.open(path, "rb")
 
 
 def _run_error_taxonomy(v: Vector) -> None:

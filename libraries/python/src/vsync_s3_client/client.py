@@ -1,11 +1,10 @@
-"""Public Vsync handle + module-level open()/get() facade.
+"""Public Vsync handle + module-level open() / open_with() / get_env() facade.
 
 This binds together:
   - `sources.resolve_bootstrap_inputs` (the two-env-var contract)
   - `config_blob.decode_config_blob` (VSYNC_CONFIG decode)
   - `manifest.unwrap_rqem0001` (RQEM0001 read)
   - `crypto.decrypt_rqe1` (RQE1 decrypt)
-  - `assetpath.AssetMaterializer` (lazy 0600 tempfile for asset_path)
   - the fallback chain (vault → env → defaults → missing)
 
 Vault wire format inside the decrypted bundle (v0.12 §6 is implicit on
@@ -33,9 +32,8 @@ from __future__ import annotations
 import base64
 import json
 import os
-from typing import Any, Dict, Mapping, Optional, Tuple, Union
+from typing import Any, Dict, Mapping, Optional, Tuple
 
-from .assetpath import AssetMaterializer
 from .config_blob import VsyncConfig, decode_config_blob
 from .crypto import decrypt_rqe1
 from .exceptions import (
@@ -105,8 +103,8 @@ def _parse_vault_payload(payload: bytes) -> Tuple[Dict[str, str], Dict[str, byte
 class Vsync:
     """In-memory accessor for a decrypted vault.
 
-    Construct via the module-level `open()`. Tests can construct directly
-    with `_from_vault(...)` to bypass S3.
+    Construct via the module-level `open()` or `open_with()`. Tests can
+    construct directly with `_from_vault(...)` to bypass S3.
     """
 
     def __init__(
@@ -126,7 +124,6 @@ class Vsync:
         self._generation: int = int(generation)
         self._env: str = env
         self._closed: bool = False
-        self._asset_materializer: Optional[AssetMaterializer] = None
         # Captured at open() time so remote_generation() can re-poll
         # through the same fetcher seam. Tests that build a handle via
         # `_from_vault` leave both None — remote_generation() will then
@@ -136,7 +133,7 @@ class Vsync:
 
     # ─── Fallback chain (v0.12 §5) ──────────────────────────────────────
 
-    def get(self, key: str) -> Optional[str]:
+    def get_env(self, key: str) -> Optional[str]:
         """Resolve `key` through vault → env → defaults → missing."""
         if self._closed:
             raise ValueError("Vsync: handle is closed")
@@ -151,7 +148,7 @@ class Vsync:
             return self._defaults[key]
         return None
 
-    def has(self, key: str) -> bool:
+    def has_env(self, key: str) -> bool:
         """True iff vault, env, or defaults would resolve `key`."""
         if self._closed:
             raise ValueError("Vsync: handle is closed")
@@ -161,7 +158,7 @@ class Vsync:
             or key in self._defaults
         )
 
-    def source(self, key: str) -> Source:
+    def env_source(self, key: str) -> Source:
         """Name the step in the fallback chain that wins (or 'missing').
 
         Safe to log — never returns the value itself, only the label.
@@ -176,21 +173,16 @@ class Vsync:
             return "default"
         return "missing"
 
-    # ─── Asset accessors (v0.12 §6) ────────────────────────────────────
+    # ─── Binary asset access (v0.12 §6) ────────────────────────────────
 
-    def asset_bytes(self, name: str) -> bytes:
+    def get_as_content(self, name: str) -> bytes:
         """Return the binary asset's bytes. Never touches the filesystem.
 
-        Preferred over `asset_path` in new code.
+        If an SDK demands a filesystem path, the caller writes a tempfile
+        themselves — see spec §4.1 for the 3-line recipe.
         """
         if self._closed:
             raise ValueError("Vsync: handle is closed")
-        # Asset lookup falls through KV when the value happens to be stored
-        # there as a scalar — handy for the conformance corpus where vault
-        # values are bytes-as-strings (see `asset-path` README, where the
-        # vault[key] entry is "<binary — see .bin>" and the .bin is the
-        # source of truth). The harness loads the .bin and overrides the
-        # KV at construction time, so this branch sees the raw bytes.
         if name in self._assets:
             return self._assets[name]
         if name in self._kv:
@@ -202,19 +194,6 @@ class Vsync:
             f"{list(self._assets)!r}, kv keys with this name: "
             f"{name in self._kv})"
         )
-
-    def asset_path(self, name: str) -> str:
-        """Lazily materialize the asset bytes to a 0600 tempfile; return path.
-
-        Repeated calls with the same `name` return the cached path. The
-        per-handle tempdir is created on first call (mode 0700) and removed
-        on `close()`. SIGKILL → leak; see v0.12 §6.
-        """
-        if self._closed:
-            raise ValueError("Vsync: handle is closed")
-        if self._asset_materializer is None:
-            self._asset_materializer = AssetMaterializer()
-        return self._asset_materializer.materialize(name, self.asset_bytes(name))
 
     # ─── Bundle metadata ───────────────────────────────────────────────
 
@@ -256,15 +235,12 @@ class Vsync:
     # ─── Lifecycle ─────────────────────────────────────────────────────
 
     def close(self) -> None:
-        """Idempotent best-effort cleanup. Drops the vault, unlinks tempfiles."""
+        """Idempotent best-effort cleanup. Drops the in-memory vault."""
         if self._closed:
             return
         self._closed = True
         self._kv.clear()
         self._assets.clear()
-        if self._asset_materializer is not None:
-            self._asset_materializer.close()
-            self._asset_materializer = None
 
     def __enter__(self) -> "Vsync":
         return self
@@ -292,7 +268,8 @@ class Vsync:
         defaults: Optional[Mapping[str, str]] = None,
     ) -> "Vsync":
         """Construct a Vsync without an S3 round-trip — for unit tests + the
-        conformance loader. Production callers must use `open()`.
+        conformance loader. Production callers must use `open()` or
+        `open_with()`.
         """
         return cls(
             kv=kv or {},
@@ -400,16 +377,16 @@ def _default_s3_fetcher(cfg: VsyncConfig) -> Tuple[bytes, bytes, int]:
     return manifest_bytes, bundle_bytes, gen
 
 
-def open(  # noqa: A001 - matches spec API verbatim (v0.12 §4.1)
-    *,
-    defaults: Optional[Mapping[str, str]] = None,
+def _build_handle(
+    config_blob: bytes,
+    passphrase: str,
+    defaults: Optional[Mapping[str, str]],
 ) -> "Vsync":
-    """Read env, fetch from S3, decrypt, return a Vsync handle.
+    """Shared core for `open()` and `open_with()`.
 
-    One round trip. No retries on success. No refresh. Restart the
-    process to pick up a new vault.
+    Given already-resolved (config_blob, passphrase) bytes/str, decode
+    the blob, fetch + decrypt the bundle, and return the handle.
     """
-    config_blob, passphrase = resolve_bootstrap_inputs()
     cfg = decode_config_blob(config_blob)
 
     fetcher = _S3_FETCHER or _default_s3_fetcher
@@ -436,6 +413,49 @@ def open(  # noqa: A001 - matches spec API verbatim (v0.12 §4.1)
         _cfg=cfg,
         _fetcher=fetcher,
     )
+
+
+def open(  # noqa: A001 - matches spec API verbatim (v0.12 §4.1)
+    *,
+    defaults: Optional[Mapping[str, str]] = None,
+) -> "Vsync":
+    """Read VSYNC_CONFIG + VSYNC_PASSPHRASE from env, fetch from S3,
+    decrypt, return a Vsync handle.
+
+    One round trip. No retries on success. No refresh. Restart the
+    process to pick up a new vault.
+    """
+    config_blob, passphrase = resolve_bootstrap_inputs()
+    return _build_handle(config_blob, passphrase, defaults)
+
+
+def open_with(
+    *,
+    config: str,
+    passphrase: str,
+    defaults: Optional[Mapping[str, str]] = None,
+) -> "Vsync":
+    """Open with bootstrap strings passed directly — no env reads.
+
+    Use when the operator's bootstrap lives in a KMS, Hashicorp Vault, or
+    a custom secrets layer (anywhere that's not the process env). Same
+    return type as `open()`, same behaviour from then on.
+
+    Validates the inputs the same way `open()` validates the env-resolved
+    ones: empty / None either field → `ConfigMissingError`.
+    """
+    if not config:
+        raise ConfigMissingError(
+            "vsync: open_with(config=...) is empty — fetch the config "
+            "blob from your secrets layer and pass it in"
+        )
+    if not passphrase:
+        raise ConfigMissingError(
+            "vsync: open_with(passphrase=...) is empty — fetch the "
+            "passphrase from your secrets layer and pass it in"
+        )
+    config_bytes = config.encode("utf-8") if isinstance(config, str) else config
+    return _build_handle(config_bytes, passphrase, defaults)
 
 
 # Minimum salt string length, per v0.12 §2.1 (Convention A — locked at
@@ -481,7 +501,7 @@ def _kdf_salt(cfg: VsyncConfig) -> str:
 _SINGLETON: Optional[Vsync] = None
 
 
-def get(key: str) -> Optional[str]:
+def get_env(key: str) -> Optional[str]:
     """Convenience: open() on first call, then resolve `key`.
 
     Long-running apps should hold a `Vsync` handle explicitly so they
@@ -491,7 +511,7 @@ def get(key: str) -> Optional[str]:
     global _SINGLETON
     if _SINGLETON is None:
         _SINGLETON = open()
-    return _SINGLETON.get(key)
+    return _SINGLETON.get_env(key)
 
 
 def _reset_singleton() -> None:
@@ -504,4 +524,4 @@ def _reset_singleton() -> None:
             _SINGLETON = None
 
 
-__all__ = ["Vsync", "open", "get"]
+__all__ = ["Vsync", "open", "open_with", "get_env"]
