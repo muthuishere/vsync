@@ -441,7 +441,7 @@ describe("runtime-token — salt + iterations (v0.10 §4)", () => {
   beforeEach(() => captureSetup());
   afterEach(() => captureRestore());
 
-  test("emits salt as standard base64 of cfg.encryption.salt's UTF-8 bytes (PBKDF2-input-identical)", async () => {
+  test("emits salt verbatim from cfg.encryption.salt (string pass-through, no base64 wrap)", async () => {
     await saveConfigFile(TEST_REPO, "dev", sampleConfig);
     await setKey(TEST_REPO, "dev", generateKey());
 
@@ -453,19 +453,14 @@ describe("runtime-token — salt + iterations (v0.10 §4)", () => {
     }
 
     const blob = decodeBlob(joinStdout());
-    // The wire `salt` field is standard base64 (note: standard alphabet,
-    // with padding) — distinct from the outer blob's base64url-no-pad.
+
+    // Per v0.10 §4 / v0.12 §2.1: salt is emitted verbatim from
+    // cfg.encryption.salt. Readers feed its UTF-8 bytes to PBKDF2 — they
+    // do NOT base64-decode first. This is the string-utf8 convention that
+    // matches src/crypto.ts::deriveKey and the test-vector corpus.
     expect(typeof blob.salt).toBe("string");
     expect(blob.salt.length).toBeGreaterThan(0);
-    // Standard base64 alphabet only.
-    expect(/^[A-Za-z0-9+/]+={0,2}$/.test(blob.salt)).toBe(true);
-
-    // Byte-identity check: the bytes a runtime reader feeds to PBKDF2
-    // (base64-decode of `salt`) must equal exactly the bytes the CLI's
-    // crypto path feeds to PBKDF2 (UTF-8 of cfg.encryption.salt).
-    const readerSaltBytes = Buffer.from(blob.salt, "base64");
-    const cliPbkdf2InputBytes = Buffer.from(sampleConfig.encryption.salt, "utf8");
-    expect(Array.from(readerSaltBytes)).toEqual(Array.from(cliPbkdf2InputBytes));
+    expect(blob.salt).toBe(sampleConfig.encryption.salt);
 
     // Iterations: stock CLI uses 600000 (v0.2 spec reference value).
     expect(blob.iterations).toBe(600000);
