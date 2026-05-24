@@ -8,20 +8,38 @@ import (
 )
 
 // fakeFetcher implements Fetcher for unit tests. Records the cfg it was
-// called with and returns whatever bytes the test fixture supplies.
+// called with and returns whatever bytes the test fixture supplies. The
+// `remoteGen` / `remoteErr` fields drive FetchManifest separately so the
+// RemoteGeneration carve-out (v0.12 §4.5, §7.1) can be exercised in Open
+// integration tests too — leave both zero/nil to mirror Fetch's gen.
 type fakeFetcher struct {
-	manifest []byte
-	bundle   []byte
-	gen      int
-	err      error
-	called   bool
-	cfg      *Config
+	manifest      []byte
+	bundle        []byte
+	gen           int
+	err           error
+	called        bool
+	cfg           *Config
+	manifestCalls int
+	remoteGen     int
+	remoteGenSet  bool
+	remoteErr     error
 }
 
 func (f *fakeFetcher) Fetch(ctx context.Context, cfg *Config) (manifest []byte, bundle []byte, generation int, err error) {
 	f.called = true
 	f.cfg = cfg
 	return f.manifest, f.bundle, f.gen, f.err
+}
+
+func (f *fakeFetcher) FetchManifest(ctx context.Context, cfg *Config) (int, error) {
+	f.manifestCalls++
+	if f.remoteErr != nil {
+		return 0, f.remoteErr
+	}
+	if f.remoteGenSet {
+		return f.remoteGen, nil
+	}
+	return f.gen, nil
 }
 
 // makeConfigBlobForTest mints a blob that carries `saltString` verbatim
@@ -155,6 +173,50 @@ func TestOpenAcceptsDefaults(t *testing.T) {
 	}
 	if c.Source("PORT") != SourceDefault {
 		t.Errorf("source mismatch")
+	}
+}
+
+func TestOpenWiresFetcherForRemoteGeneration(t *testing.T) {
+	// End-to-end through Open: confirm the Client carries the injected
+	// fetcher + decoded Config so RemoteGeneration can run after Open.
+	salt := "AAAAAAAAAAAAAAAA"
+	passphrase := "p"
+	plaintext := []byte(`{}`)
+	bundle, _ := encryptRQE1ForTest(plaintext, passphrase, salt, 600_000)
+	manifest := wrapManifestForTest("20260524-000000", bundle)
+
+	cfgBlob := makeConfigBlobForTest(t, salt, 600_000)
+	t.Setenv("VSYNC_CONFIG", string(cfgBlob))
+	t.Setenv("VSYNC_PASSPHRASE", passphrase)
+
+	f := &fakeFetcher{
+		manifest:     manifest,
+		bundle:       bundle,
+		gen:          4,
+		remoteGen:    9,
+		remoteGenSet: true,
+	}
+	c, err := Open(context.Background(), WithFetcher(f))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer c.Close()
+	if c.Generation() != 4 {
+		t.Fatalf("Generation after Open: got %d, want 4", c.Generation())
+	}
+	remote, err := c.RemoteGeneration(context.Background())
+	if err != nil {
+		t.Fatalf("RemoteGeneration: %v", err)
+	}
+	if remote != 9 {
+		t.Errorf("RemoteGeneration: got %d, want 9", remote)
+	}
+	// Local gen still untouched.
+	if c.Generation() != 4 {
+		t.Errorf("local gen mutated through Open path: got %d, want 4", c.Generation())
+	}
+	if f.manifestCalls != 1 {
+		t.Errorf("FetchManifest call count: got %d, want 1", f.manifestCalls)
 	}
 }
 

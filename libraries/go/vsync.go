@@ -10,8 +10,15 @@ import (
 // generation lets Open stay testable without spinning up AWS — the
 // default fetcher in s3_fetcher.go uses aws-sdk-go-v2; tests inject a
 // fake via WithFetcher.
+//
+// FetchManifest reads only the lightweight gen counter from the manifest
+// side-channel (`<prefix>latest.meta`'s `gen` field). It powers
+// Client.RemoteGeneration / Client.HasNewVersion — the v0.12 §7.1
+// poll-once carve-out. Splitting it from Fetch lets the poll skip the
+// bundle GET + decrypt round-trip entirely.
 type Fetcher interface {
 	Fetch(ctx context.Context, cfg *Config) (manifest []byte, bundle []byte, generation int, err error)
+	FetchManifest(ctx context.Context, cfg *Config) (generation int, err error)
 }
 
 // Options collects optional knobs for Open. Use the With* functional
@@ -109,6 +116,8 @@ func openWithBootstrap(ctx context.Context, cfgBlob []byte, passphrase string, o
 		defaults:   options.defaults,
 		generation: generation,
 		env:        cfg.Env,
+		fetcher:    options.fetcher,
+		cfg:        cfg,
 	}, nil
 }
 

@@ -1,6 +1,7 @@
 package vsync
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -34,6 +35,12 @@ type Client struct {
 	env        string
 	materializ *assetMaterializer
 	closed     bool
+	// fetcher + cfg are retained from Open so RemoteGeneration /
+	// HasNewVersion can issue a fresh manifest read without re-resolving
+	// the bootstrap inputs. nil when the Client was constructed via a
+	// test helper that skipped Open (the methods then return an error).
+	fetcher Fetcher
+	cfg     *Config
 }
 
 // Get resolves key through vault → env → defaults → missing (v0.12 §5).
@@ -139,6 +146,48 @@ func (c *Client) AssetPath(name string) (string, error) {
 // latest vault.
 func (c *Client) Generation() int {
 	return c.generation
+}
+
+// RemoteGeneration issues one manifest read against S3 and returns the
+// current gen counter. Does NOT mutate the local generation (v0.12 §4.5,
+// §7.1 — pull-once carve-out for explicit polling).
+//
+// Returns (0, ErrS3Unreachable) on network failure, (0,
+// ErrManifestNotFound) on 404. The local Generation() value stays
+// whatever Open captured.
+func (c *Client) RemoteGeneration(ctx context.Context) (int64, error) {
+	if c.closed {
+		return 0, fmt.Errorf("vsync: handle is closed")
+	}
+	if c.fetcher == nil || c.cfg == nil {
+		return 0, fmt.Errorf("vsync: client has no fetcher (constructed outside Open)")
+	}
+	gen, err := c.fetcher.FetchManifest(ctx, c.cfg)
+	if err != nil {
+		// Caller-provided sentinels propagate untouched; anything else gets
+		// wrapped as ErrS3Unreachable to match the Open path's fail-loud
+		// classification.
+		if isVSyncSentinel(err) {
+			return 0, err
+		}
+		return 0, fmt.Errorf("%w: manifest fetch failed: %v", ErrS3Unreachable, err)
+	}
+	return int64(gen), nil
+}
+
+// HasNewVersion reports whether the upstream gen is strictly greater
+// than the local gen captured at Open. Convenience over RemoteGeneration
+// for /healthz endpoints and sidecar crons (v0.12 §7.1) — restart is
+// still the only way to actually adopt the new bundle.
+//
+// On error, returns (false, err) where err propagates the underlying
+// RemoteGeneration failure.
+func (c *Client) HasNewVersion(ctx context.Context) (bool, error) {
+	remote, err := c.RemoteGeneration(ctx)
+	if err != nil {
+		return false, err
+	}
+	return remote > int64(c.generation), nil
 }
 
 // Close releases the in-memory vault and removes any materialized tempfiles.

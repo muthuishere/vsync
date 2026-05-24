@@ -19,15 +19,7 @@ import (
 type defaultFetcher struct{}
 
 func (defaultFetcher) Fetch(ctx context.Context, cfg *Config) (manifestBytes []byte, bundleBytes []byte, generation int, err error) {
-	client := s3.NewFromConfig(awsConfig.Config{
-		Region:      cfg.Region,
-		Credentials: credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
-	}, func(o *s3.Options) {
-		o.UsePathStyle = true
-		if cfg.Endpoint != "" {
-			o.BaseEndpoint = stringPtr(cfg.Endpoint)
-		}
-	})
+	client := newS3Client(cfg)
 
 	manifestKey := cfg.Prefix + "manifest"
 	manifestBytes, err = s3Get(ctx, client, cfg.Bucket, manifestKey)
@@ -51,18 +43,53 @@ func (defaultFetcher) Fetch(ctx context.Context, cfg *Config) (manifestBytes []b
 		return nil, nil, 0, classifyS3Err(err, bundleKey)
 	}
 
-	// Optional gen counter — absent on pre-rotation bundles, so 404 is fine.
-	gen := 0
-	metaBytes, metaErr := s3Get(ctx, client, cfg.Bucket, cfg.Prefix+"latest.meta")
-	if metaErr == nil {
-		var meta struct {
-			Gen int `json:"gen"`
-		}
-		if json.Unmarshal(metaBytes, &meta) == nil {
-			gen = meta.Gen
-		}
-	}
+	gen := readGenCounter(ctx, client, cfg)
 	return manifestBytes, bundleBytes, gen, nil
+}
+
+// FetchManifest returns the current upstream gen counter without pulling
+// the bundle. Backs Client.RemoteGeneration / HasNewVersion (v0.12 §7.1).
+// 404 on the manifest itself surfaces as ErrManifestNotFound; the meta
+// side-channel is treated as best-effort and a missing meta becomes gen=0
+// rather than an error (matches the Open-path tolerance for
+// pre-rotation bundles).
+func (defaultFetcher) FetchManifest(ctx context.Context, cfg *Config) (int, error) {
+	client := newS3Client(cfg)
+	manifestKey := cfg.Prefix + "manifest"
+	if _, err := s3Get(ctx, client, cfg.Bucket, manifestKey); err != nil {
+		return 0, classifyS3Err(err, manifestKey)
+	}
+	return readGenCounter(ctx, client, cfg), nil
+}
+
+func newS3Client(cfg *Config) *s3.Client {
+	return s3.NewFromConfig(awsConfig.Config{
+		Region:      cfg.Region,
+		Credentials: credentials.NewStaticCredentialsProvider(cfg.AccessKeyID, cfg.SecretAccessKey, ""),
+	}, func(o *s3.Options) {
+		o.UsePathStyle = true
+		if cfg.Endpoint != "" {
+			o.BaseEndpoint = stringPtr(cfg.Endpoint)
+		}
+	})
+}
+
+// readGenCounter returns the gen counter from `<prefix>latest.meta`, or 0
+// when the meta object is absent (pre-rotation bundles) or
+// unparseable. Network failures here are swallowed deliberately — the
+// caller has already proven the bucket is reachable via the manifest GET.
+func readGenCounter(ctx context.Context, client *s3.Client, cfg *Config) int {
+	metaBytes, err := s3Get(ctx, client, cfg.Bucket, cfg.Prefix+"latest.meta")
+	if err != nil {
+		return 0
+	}
+	var meta struct {
+		Gen int `json:"gen"`
+	}
+	if json.Unmarshal(metaBytes, &meta) != nil {
+		return 0
+	}
+	return meta.Gen
 }
 
 func s3Get(ctx context.Context, client *s3.Client, bucket, key string) ([]byte, error) {

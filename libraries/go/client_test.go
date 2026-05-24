@@ -2,7 +2,9 @@ package vsync
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 )
@@ -222,5 +224,150 @@ func TestParseVaultPayloadRejectsNonObject(t *testing.T) {
 	_, _, err := parseVaultPayload([]byte(`["not", "an", "object"]`))
 	if !errors.Is(err, ErrBundleCorrupt) {
 		t.Fatalf("expected ErrBundleCorrupt, got %v", err)
+	}
+}
+
+// stubManifestFetcher is a Fetcher used by the RemoteGeneration / HasNewVersion
+// tests. The constructor lets the test seed (a) the open-time gen, (b) the
+// follow-up RemoteGeneration result (or error). All other Fetcher inputs
+// (manifest/bundle) are nil — the tests construct the Client via
+// fromVaultWithFetcherForTest, skipping Open's decrypt path entirely.
+type stubManifestFetcher struct {
+	openGen   int
+	remoteGen int
+	remoteErr error
+	calls     int
+}
+
+func (s *stubManifestFetcher) Fetch(ctx context.Context, cfg *Config) ([]byte, []byte, int, error) {
+	return nil, nil, s.openGen, nil
+}
+
+func (s *stubManifestFetcher) FetchManifest(ctx context.Context, cfg *Config) (int, error) {
+	s.calls++
+	if s.remoteErr != nil {
+		return 0, s.remoteErr
+	}
+	return s.remoteGen, nil
+}
+
+// fromVaultWithFetcherForTest is like fromVaultForTest but also wires a
+// Fetcher + Config onto the Client so RemoteGeneration / HasNewVersion can
+// be exercised without an S3 round-trip.
+func fromVaultWithFetcherForTest(generation int, env string, f Fetcher, cfg *Config) *Client {
+	c := fromVaultForTest(nil, nil, nil, generation, env)
+	c.fetcher = f
+	c.cfg = cfg
+	return c
+}
+
+func TestRemoteGenerationReturnsRemoteGenLeavesLocalUntouched(t *testing.T) {
+	stub := &stubManifestFetcher{openGen: 5, remoteGen: 7}
+	c := fromVaultWithFetcherForTest(5, "prod", stub, &Config{})
+	defer c.Close()
+
+	if c.Generation() != 5 {
+		t.Fatalf("local gen at open: got %d, want 5", c.Generation())
+	}
+	remote, err := c.RemoteGeneration(context.Background())
+	if err != nil {
+		t.Fatalf("RemoteGeneration: %v", err)
+	}
+	if remote != 7 {
+		t.Errorf("RemoteGeneration: got %d, want 7", remote)
+	}
+	// Polling must NOT mutate the local gen (v0.12 §4.5).
+	if c.Generation() != 5 {
+		t.Errorf("local gen mutated by RemoteGeneration: got %d, want 5", c.Generation())
+	}
+}
+
+func TestRemoteGenerationReturnsErrS3UnreachableOnNetworkFailure(t *testing.T) {
+	stub := &stubManifestFetcher{
+		openGen:   3,
+		remoteErr: fmt.Errorf("%w: connection refused", ErrS3Unreachable),
+	}
+	c := fromVaultWithFetcherForTest(3, "prod", stub, &Config{})
+	defer c.Close()
+
+	_, err := c.RemoteGeneration(context.Background())
+	if !errors.Is(err, ErrS3Unreachable) {
+		t.Fatalf("expected ErrS3Unreachable, got %v", err)
+	}
+}
+
+func TestRemoteGenerationReturnsErrManifestNotFoundOn404(t *testing.T) {
+	stub := &stubManifestFetcher{
+		openGen:   2,
+		remoteErr: fmt.Errorf("%w: object 404", ErrManifestNotFound),
+	}
+	c := fromVaultWithFetcherForTest(2, "prod", stub, &Config{})
+	defer c.Close()
+
+	_, err := c.RemoteGeneration(context.Background())
+	if !errors.Is(err, ErrManifestNotFound) {
+		t.Fatalf("expected ErrManifestNotFound, got %v", err)
+	}
+}
+
+func TestHasNewVersionTrueWhenLocalBehind(t *testing.T) {
+	stub := &stubManifestFetcher{openGen: 3, remoteGen: 4}
+	c := fromVaultWithFetcherForTest(3, "prod", stub, &Config{})
+	defer c.Close()
+
+	stale, err := c.HasNewVersion(context.Background())
+	if err != nil {
+		t.Fatalf("HasNewVersion: %v", err)
+	}
+	if !stale {
+		t.Errorf("HasNewVersion: local=3 remote=4 should be true")
+	}
+}
+
+func TestHasNewVersionFalseWhenLocalCurrent(t *testing.T) {
+	stub := &stubManifestFetcher{openGen: 5, remoteGen: 5}
+	c := fromVaultWithFetcherForTest(5, "prod", stub, &Config{})
+	defer c.Close()
+
+	stale, err := c.HasNewVersion(context.Background())
+	if err != nil {
+		t.Fatalf("HasNewVersion: %v", err)
+	}
+	if stale {
+		t.Errorf("HasNewVersion: local=5 remote=5 should be false")
+	}
+}
+
+func TestHasNewVersionFalseWhenLocalAhead(t *testing.T) {
+	stub := &stubManifestFetcher{openGen: 10, remoteGen: 8}
+	c := fromVaultWithFetcherForTest(10, "prod", stub, &Config{})
+	defer c.Close()
+
+	stale, err := c.HasNewVersion(context.Background())
+	if err != nil {
+		t.Fatalf("HasNewVersion: %v", err)
+	}
+	if stale {
+		t.Errorf("HasNewVersion: local=10 remote=8 should be false")
+	}
+}
+
+func TestHasNewVersionPropagatesError(t *testing.T) {
+	stub := &stubManifestFetcher{
+		openGen:   3,
+		remoteErr: fmt.Errorf("%w: dns lookup", ErrS3Unreachable),
+	}
+	c := fromVaultWithFetcherForTest(3, "prod", stub, &Config{})
+	defer c.Close()
+
+	stale, err := c.HasNewVersion(context.Background())
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !errors.Is(err, ErrS3Unreachable) {
+		t.Fatalf("expected ErrS3Unreachable, got %v", err)
+	}
+	if stale {
+		t.Errorf("HasNewVersion: on error, stale should be false; got true")
 	}
 }
