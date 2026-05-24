@@ -91,13 +91,20 @@ def test_obvious_truncation_below_header_raises_bundle_corrupt():
         decrypt_rqe1(b"RQE1\x00\x00", PASS, SALT)
 
 
+def test_structural_threshold_31_bytes_raises_bundle_corrupt():
+    # The conformance corpus's regenerated `truncated-ciphertext` vector
+    # is 30 bytes — exercising the structural heuristic explicitly here.
+    # Anything < 32 (header 16 + min tag 16) can't be a valid envelope.
+    blob = b"RQE1" + b"\x00" * 27  # 31 bytes
+    with pytest.raises(BundleCorruptError):
+        decrypt_rqe1(blob, PASS, SALT)
+
+
 def test_truncated_long_envelope_raises_wrong_passphrase():
     # A truncation that still leaves >= tag_len bytes of "ciphertext" is
     # structurally indistinguishable from a tampered-tag envelope at this
     # layer (no plaintext-length field on the wire). Both surface as the
-    # tag-rejection class. The conformance vector `truncated-ciphertext`
-    # expects BundleCorruptError — flagged to team-lead as a spec ambiguity;
-    # see report at the end of wave 5.
+    # tag-rejection class. Honest limit, documented in the spec amendment.
     blob = encrypt_rqe1_for_test(b"longer payload to clearly survive header", PASS, SALT)
     truncated = blob[:-8]
     with pytest.raises(WrongPassphraseError):

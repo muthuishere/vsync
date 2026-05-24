@@ -151,9 +151,14 @@ pytest tests/conformance  # cross-language conformance only
 
 The conformance suite walks `docs/specs/test-vectors/` and runs the corpus's `.bin` fixtures through this library's decode path. Per [`v0.11`](../../docs/specs/v0.11-conformance-test-vectors.md), error class identity is matched on `__class__.__name__` — not on a generic `Exception` catch.
 
-## Known deviations from the spec
+## Honest limits
 
-- **`rqe1-decrypt-error/truncated-ciphertext`** expects `BundleCorruptError` but this lib raises `WrongPassphraseError`. The AES-GCM library can't distinguish a clipped tag from a tampered tag without an explicit plaintext-length field on the wire. Test marked as skipped with the reason; see the Wave 5 handoff for the open spec question.
+RQE1 truncation detection is **best-effort**:
+
+- A **structurally short** envelope (< 32 bytes — less than `magic(4) + IV(12) + GCM-tag(16)`) is detected and raises `BundleCorruptError`.
+- A **mid-payload truncation that lands on a tag-length boundary** is indistinguishable from a wrong-passphrase tag failure, and surfaces as `WrongPassphraseError`. This is a property of AES-GCM without an explicit plaintext-length field on the wire — not a lib bug.
+
+The conformance corpus's `rqe1-decrypt-error/truncated-ciphertext` vector exercises the structural path and passes.
 
 ## File layout
 

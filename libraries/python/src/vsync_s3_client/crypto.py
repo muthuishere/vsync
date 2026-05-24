@@ -17,6 +17,7 @@ KDF: PBKDF2-HMAC-SHA256, 600_000 iterations → 32-byte AES-256 key.
 from __future__ import annotations
 
 import os
+from typing import Union
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
@@ -40,11 +41,18 @@ KEY_LEN = 32
 MIN_CT_LEN = 16
 
 
-def _derive_key(passphrase: str, salt: str, iterations: int) -> bytes:
+def _derive_key(passphrase: str, salt: Union[str, bytes], iterations: int) -> bytes:
+    # Per v0.12 §2.1 (post-revision): the salt is fed to PBKDF2 as raw
+    # bytes. A `str` argument is utf-8-encoded (matches the CLI's own
+    # on-disk path, where the salt is a 24-char base64 ASCII string fed
+    # as ASCII bytes); a `bytes` argument is used verbatim (matches the
+    # runtime path, where `open()` base64-decodes `cfg.salt` to raw bytes
+    # before calling this).
+    salt_bytes = salt.encode("utf-8") if isinstance(salt, str) else bytes(salt)
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=KEY_LEN,
-        salt=salt.encode("utf-8"),
+        salt=salt_bytes,
         iterations=iterations,
     )
     return kdf.derive(passphrase.encode("utf-8"))
@@ -53,7 +61,7 @@ def _derive_key(passphrase: str, salt: str, iterations: int) -> bytes:
 def decrypt_rqe1(
     blob: bytes,
     passphrase: str,
-    salt: str,
+    salt: Union[str, bytes],
     iterations: int = PBKDF2_ITERATIONS,
 ) -> bytes:
     """Decrypt an RQE1 envelope. Maps crypto failures to the v0.12 taxonomy:
@@ -102,7 +110,7 @@ def decrypt_rqe1(
 def encrypt_rqe1_for_test(
     plaintext: bytes,
     passphrase: str,
-    salt: str,
+    salt: Union[str, bytes],
     iterations: int = PBKDF2_ITERATIONS,
 ) -> bytes:
     """Round-trip helper for the unit suite — DO NOT call from production code.

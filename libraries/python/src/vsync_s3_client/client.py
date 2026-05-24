@@ -41,6 +41,7 @@ from .crypto import decrypt_rqe1
 from .exceptions import (
     BundleCorruptError,
     ConfigMissingError,
+    ConfigUnsupportedVersionError,
     ManifestNotFoundError,
     S3UnreachableError,
     VSyncError,
@@ -396,10 +397,42 @@ def open(  # noqa: A001 - matches spec API verbatim (v0.12 §4.1)
     )
 
 
+# Minimum salt string length, per v0.12 §2.1 (Convention A — locked at
+# commit bc52f51). The salt is fed to PBKDF2 as the UTF-8 bytes of the
+# string, verbatim — MUST NOT be base64-decoded first. This matches
+# `src/crypto.ts::deriveKey` (the canonical writer) which TextEncoder-
+# encodes the salt string directly. The CLI's actual on-disk salt is a
+# 24-char ASCII base64 string; 16 chars is a sanity floor (not a security
+# minimum — the CLI's writer side defines what's secure).
+_MIN_SALT_LEN = 16
+
+
 def _kdf_salt(cfg: VsyncConfig) -> str:
-    """Salt the PBKDF2 derivation uses. The CLI's `runtime-token` mints
-    it into the blob (v0.12 §2.1 post-revision); we just pass it through."""
-    return cfg.salt
+    """Return `cfg.salt` verbatim as the PBKDF2 salt string, per v0.12 §2.1
+    (Convention A — locked at commit bc52f51).
+
+    The CLI writes the salt to the bootstrap blob as an opaque string;
+    `runtime-token` emits `cfg.encryption.salt` verbatim with no base64
+    wrap. The runtime library MUST feed the UTF-8 bytes of this string
+    directly to PBKDF2 — NOT base64-decode it first. (Convention B was a
+    short-lived misread of the spec; reverted at the same commit.)
+
+    Validates string length (not decoded byte length). Malformed input
+    surfaces as `ConfigUnsupportedVersionError` — matches the "malformed
+    v:1 blob" pattern from the taxonomy.
+    """
+    salt_str = cfg.salt
+    if not isinstance(salt_str, str) or len(salt_str) < _MIN_SALT_LEN:
+        raise ConfigUnsupportedVersionError(
+            f"VSYNC_CONFIG: salt must be a string of at least "
+            f"{_MIN_SALT_LEN} characters; got {len(salt_str) if isinstance(salt_str, str) else type(salt_str).__name__}"
+        )
+    if not isinstance(cfg.iterations, int) or cfg.iterations <= 0:
+        raise ConfigUnsupportedVersionError(
+            f"VSYNC_CONFIG: iterations must be a positive int, got "
+            f"{cfg.iterations!r}"
+        )
+    return salt_str
 
 
 # ─── Module-level singleton (v0.12 §4.1, convenience for scripts) ──────

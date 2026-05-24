@@ -54,16 +54,18 @@ ERROR_CLASS: dict[str, Type[VSyncError]] = {
 
 
 # Vectors that surface a different (but defensible) error class than what
-# the corpus pins. Each entry maps a vector's basename to the *actual* class
-# the Python lib raises, with a one-line justification. These are reported
-# as expected failures rather than silent passes — the team can review.
-SPEC_AMBIGUITIES: dict[str, tuple[str, str]] = {
-    "rqe1-decrypt-error/truncated-ciphertext": (
-        "WrongPassphraseError",
-        "AES-GCM cannot distinguish clipped vs tampered tag without a "
-        "plaintext-length field on the wire (see Wave 5 message to team-lead)",
-    ),
-}
+# the corpus pins. Empty today — Hari regenerated `truncated-ciphertext`
+# to be structurally short (< 32 bytes) and the structural threshold in
+# `crypto.decrypt_rqe1` catches it as BundleCorruptError. Kept here as a
+# hook for any future spec-vs-impl drift to be flagged explicitly rather
+# than silently skipped.
+#
+# Honest limit (worth noting in the spec amendment): RQE1 truncation
+# detection is best-effort — structurally-short envelopes are detected,
+# but mid-payload truncation that lands at a tag boundary is
+# indistinguishable from a wrong-passphrase tag failure. That's GCM
+# without explicit plaintext-length, not a lib bug.
+SPEC_AMBIGUITIES: dict[str, tuple[str, str]] = {}
 
 
 def _assert_raises_named(name: str, fn) -> None:
@@ -260,7 +262,7 @@ def _run_error_taxonomy(v: Vector) -> None:
                 "secretAccessKey": "s",
                 "prefix": "p/",
                 "env": "test",
-                "salt": "any-salt",
+                "salt": "AAAAAAAAAAAAAAAAAAAAAA==",  # 16 raw bytes, base64
                 "iterations": 600000,
             }
         ).encode()

@@ -18,13 +18,16 @@ import builtins
 from vsync_s3_client import Vsync, get
 from vsync_s3_client import open as vsync_open
 from vsync_s3_client.client import (
+    _kdf_salt,
     _parse_vault_payload,
     _reset_singleton,
     _set_s3_fetcher,
 )
+from vsync_s3_client.config_blob import VsyncConfig
 from vsync_s3_client.exceptions import (
     BundleCorruptError,
     ConfigMissingError,
+    ConfigUnsupportedVersionError,
 )
 
 
@@ -172,7 +175,87 @@ def test_parse_vault_rejects_int_kv_value():
         _parse_vault_payload(payload)
 
 
+# ─── Salt pass-through (v0.12 §2.1, Convention A — locked at bc52f51) ──
+#
+# The salt string is fed verbatim to PBKDF2 as UTF-8 bytes. No base64
+# decode. Validation is on the string's char length, not on decoded
+# bytes. Matches `src/crypto.ts::deriveKey` exactly.
+
+
+def _cfg(**overrides):
+    """Build a VsyncConfig with sensible defaults; override what the test cares about."""
+    base = dict(
+        v=1,
+        endpoint="https://s3.example.com",
+        region="us-east-1",
+        bucket="b",
+        access_key_id="k",
+        secret_access_key="s",
+        prefix="p/",
+        env="test",
+        salt="AAAAAAAAAAAAAAAAAAAAAA==",  # 24 chars — matches CLI default
+        iterations=600000,
+    )
+    base.update(overrides)
+    return VsyncConfig(**base)
+
+
+def test_kdf_salt_returns_string_verbatim():
+    # Convention A: the salt is returned as-is (str), no decode. The
+    # caller (crypto._derive_key) utf-8-encodes it before feeding PBKDF2 —
+    # byte-identical to what src/crypto.ts::deriveKey does on encrypt.
+    salt = "AAAAAAAAAAAAAAAAAAAAAA=="
+    cfg = _cfg(salt=salt)
+    assert _kdf_salt(cfg) == salt
+    assert isinstance(_kdf_salt(cfg), str)
+
+
+def test_kdf_salt_short_string_raises_config_unsupported_version():
+    # 15-char salt — one below the 16-char sanity floor.
+    cfg = _cfg(salt="A" * 15)
+    with pytest.raises(ConfigUnsupportedVersionError):
+        _kdf_salt(cfg)
+
+
+def test_kdf_salt_exactly_16_chars_accepted():
+    cfg = _cfg(salt="A" * 16)
+    assert _kdf_salt(cfg) == "A" * 16
+
+
+def test_kdf_salt_24_char_cli_default_accepted():
+    # Mirrors the CLI's actual on-disk salt shape (24-char base64 ASCII).
+    cfg = _cfg(salt="AAAAAAAAAAAAAAAAAAAAAA==")
+    assert _kdf_salt(cfg) == "AAAAAAAAAAAAAAAAAAAAAA=="
+
+
+def test_kdf_salt_non_base64_string_still_accepted():
+    # The string is opaque to the lib — any sequence of ≥ 16 chars is
+    # valid. The CLI's writer side defines what the actual content looks
+    # like; the lib just passes through.
+    cfg = _cfg(salt="not-base64-but-long-enough-to-pass")
+    assert _kdf_salt(cfg) == "not-base64-but-long-enough-to-pass"
+
+
+def test_kdf_salt_iterations_zero_raises_config_unsupported_version():
+    cfg = _cfg(iterations=0)
+    with pytest.raises(ConfigUnsupportedVersionError):
+        _kdf_salt(cfg)
+
+
+def test_kdf_salt_iterations_negative_raises_config_unsupported_version():
+    cfg = _cfg(iterations=-1)
+    with pytest.raises(ConfigUnsupportedVersionError):
+        _kdf_salt(cfg)
+
+
 # ─── open() with mocked fetcher ────────────────────────────────────────
+
+
+# Convention A: the salt is an opaque string fed verbatim to PBKDF2 as
+# utf-8 bytes. Match what `src/crypto.ts::deriveKey` does — encode("utf-8")
+# of the string. The test salt below is a real-shaped 24-char base64 ASCII
+# string (matches the CLI's actual on-disk format).
+_TEST_SALT_STR = "AAAAAAAAAAAAAAAAAAAAAA=="
 
 
 def _make_config_blob():
@@ -188,7 +271,7 @@ def _make_config_blob():
             "secretAccessKey": "s",
             "prefix": "p/",
             "env": "test",
-            "salt": "test-salt",
+            "salt": _TEST_SALT_STR,
             "iterations": 600000,
         }
     ).encode()
@@ -200,7 +283,9 @@ def _make_config_blob():
 def test_open_uses_injected_fetcher(monkeypatch):
     from vsync_s3_client.crypto import encrypt_rqe1_for_test
 
-    salt = "test-salt"  # matches the SAMPLE blob in `_make_config_blob`
+    # Encrypt with the salt STRING (not decoded bytes) — matches what
+    # _kdf_salt(cfg) now returns and what src/crypto.ts::deriveKey does.
+    salt = _TEST_SALT_STR
     passphrase = "the-passphrase"
     vault_json = json.dumps({"DATABASE_URL": "postgres://from-vault"}).encode()
     bundle = encrypt_rqe1_for_test(vault_json, passphrase, salt)
@@ -233,7 +318,7 @@ def test_open_missing_env_raises_config_missing(monkeypatch):
 def test_module_level_get_uses_singleton(monkeypatch):
     from vsync_s3_client.crypto import encrypt_rqe1_for_test
 
-    salt = "test-salt"
+    salt = _TEST_SALT_STR
     passphrase = "pp"
     vault_json = json.dumps({"X": "from-vault"}).encode()
     bundle = encrypt_rqe1_for_test(vault_json, passphrase, salt)
