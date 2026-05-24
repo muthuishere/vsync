@@ -33,10 +33,65 @@ import {
 } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "../src/argv";
+import { wantsHelp, printHelp } from "../src/help";
 import { getRepoName, getRepoRoot } from "../src/repo";
 import { loadConfigFile } from "../src/repoconfig";
 
+const HELP = `
+NAME
+  vsync use — symlink ./.env (or any path) to the vault's .env.<env>
+
+SYNOPSIS
+  vsync use <env> [--link=<path>] [--repo=<name>]
+  vsync use [--link=<path>]                 (no env: print current target)
+
+DESCRIPTION
+  Creates a POSIX symlink at <link> (default ./.env, resolved against the
+  repo root) pointing at <vaultFolder>/.env.<env>. Apps that already
+  \`dotenv.config()\` then pick up vault contents without code changes.
+  Switch envs by re-running with a different <env>.
+
+  Without <env>, prints the current target of <link> (or "(no <link>)" if
+  absent). If <link> exists as a regular file the command refuses to touch
+  it — rename or delete it first. Existing symlinks at <link> are replaced
+  silently. Warns when <link>'s basename isn't covered by .gitignore.
+
+  Cross-platform: macOS / Linux / WSL work out of the box. On Windows the
+  process needs Developer Mode or an elevated terminal — Windows file
+  symlinks are a privileged op.
+
+FLAGS
+  --link=<path>            link path, resolved against the repo root
+                           default: <repo-root>/.env
+  --repo=<name>            override the auto-detected repo name
+  --help, -h               print this help and exit
+
+EXAMPLES
+  # Default — ./.env → infra/vault/dev/.env.dev
+  vsync use dev
+
+  # Keep ./.env free; use ./.env.dev instead
+  vsync use dev --link=.env.dev
+
+  # Monorepo — drop the link inside an app folder
+  vsync use prod --link=apps/web/.env
+
+  # Print the current target without changing anything
+  vsync use
+
+EXIT CODES
+  0    symlink created / already correct, or current target printed
+  1    missing config, target .env.<env> not pulled yet, or <link> is a
+       regular file (refuses to clobber), or Windows symlink-permission denied
+
+SEE ALSO
+  vsync pull(1)            populate <vaultFolder>/.env.<env> before \`use\`
+  vsync init(1)            sets vaultFolder; \`use\` follows it transparently
+  docs/guide/use.md
+`;
+
 export async function main(argv: string[]): Promise<void> {
+  if (wantsHelp(argv)) printHelp(HELP);
   const { positional, flags } = parseArgs(argv);
   const env = positional[0];
   const root = await getRepoRoot();

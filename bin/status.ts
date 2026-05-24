@@ -13,8 +13,62 @@
 // See docs/specs/v0.13-profiles-init-status.md §4.
 
 import { parseArgs } from "../src/argv";
+import { wantsHelp, printHelp } from "../src/help";
 import { getRepoName } from "../src/repo";
 import { gatherStatus, type StatusReport } from "../src/status";
+
+const HELP = `
+NAME
+  vsync status — summarise local configs, profiles, and orphans
+
+SYNOPSIS
+  vsync status [--json] [--quiet] [--check-remote] [--repo=<name>]
+
+DESCRIPTION
+  Offline-first health check for this machine. Reads (no network):
+
+    - <XDG>/vsync/<repo>/env_* — per-(repo, env) config files
+    - <XDG>/vsync/profiles/*.json — named credential profiles
+    - the OS keychain — for orphan-no-key detection
+
+  Output is a per-env table (env / profile / prefix / gen / last push /
+  status) followed by the list of profiles and any notices (e.g. removed
+  profile, missing keychain key, orphan files). Useful before \`vsync push\`
+  to confirm the (repo, env) is fully wired up.
+
+  --json emits a machine-readable report (same data, JSON shape).
+  --quiet exits non-zero and prints failing rows to stderr only — for CI.
+  --check-remote is reserved for a future release; currently a no-op.
+
+  See docs/specs/v0.13-profiles-init-status.md §4.
+
+FLAGS
+  --json                   print a machine-readable JSON report
+  --quiet                  print only failing-row summary on stderr; exit
+                           1 if anything is broken (CI mode)
+  --check-remote           (reserved) probe S3 + audit log; not wired yet
+  --repo=<name>            override the auto-detected repo name
+  --help, -h               print this help and exit
+
+EXAMPLES
+  # Human-readable table
+  vsync status
+
+  # CI guard — exit non-zero if anything is broken
+  vsync status --quiet
+
+  # Pipe into jq for selective checks
+  vsync status --json | jq '.envs[] | select(.status.ok == false)'
+
+EXIT CODES
+  0    every env is OK (or only informational notices)
+  1    --json and --quiet combined; or --quiet and at least one env broken
+
+SEE ALSO
+  vsync init(1)            populate the configs this command summarises
+  vsync profile list(1)    inspect the profiles referenced here
+  docs/specs/v0.13-profiles-init-status.md
+`;
 
 /** Render the human-readable tabular output as a single string. */
 export function renderStatusText(report: StatusReport): string {
@@ -120,6 +174,7 @@ export function renderStatusJson(report: StatusReport): string {
 }
 
 export async function main(argv: string[]): Promise<void> {
+  if (wantsHelp(argv)) printHelp(HELP);
   const { flags } = parseArgs(argv);
   const wantJson = flags.json === "true";
   const wantQuiet = flags.quiet === "true";

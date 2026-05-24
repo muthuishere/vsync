@@ -8,6 +8,7 @@
 
 import { join } from "node:path";
 import { parseArgs } from "../src/argv";
+import { wantsHelp, printHelp } from "../src/help";
 import { parseEnvFile } from "../src/envfile";
 import { getRepoName, getRepoRoot } from "../src/repo";
 import { loadConfigFile, saveConfigFile } from "../src/repoconfig";
@@ -17,7 +18,84 @@ import { HANDLERS, type TargetName } from "../src/synctargets";
 const WORKERS = 6;
 const TIMEOUT_MS = 10 * 60 * 1000;
 
+const HELP = `
+NAME
+  vsync sync — fan out <vaultFolder>/.env.<env> to an external secret store
+
+SYNOPSIS
+  vsync sync <env> <gh|gcp|aws|azure|vault> [routing flags] [parser flags]
+
+DESCRIPTION
+  Reads the resolved <vaultFolder>/.env.<env>, parses it according to the
+  EXPLICIT parser policy (no defaults — pass --inline-file-suffix and
+  --exclude-property explicitly), and writes each KV to the chosen secret
+  backend. One target per invocation.
+
+  Targets (handlers under src/synctargets/):
+    gh       GitHub repo secrets (environment = <env>)
+    gcp      GCP Secret Manager
+    aws      AWS Secrets Manager
+    azure    Azure Key Vault
+    vault    HashiCorp Vault KV v2 (single atomic bulk write)
+
+  gh/gcp/aws/azure run with 6 parallel workers and a 10-minute timeout;
+  vault is one atomic PUT (KV v2 is path-atomic). The dispatcher prints
+  the resolved parser policy as a banner before each run.
+
+  See docs/specs/v0.7-explicit-sync-parser.md and v0.8-multi-target-sync.md.
+
+FLAGS
+  Parser policy (required when applicable):
+    --inline-file-suffix=<suf>   key suffix that turns a value into a file
+                                 reference (repeatable; e.g. _FILE)
+    --exclude-property=<key>     key to skip entirely (repeatable)
+
+  Routing flags (per target):
+    --gh-repo=<owner/name>
+    --gcp-project=<id>
+    --aws-region=<region>            [--aws-secret-prefix=<prefix>]
+    --azure-vault=<vault-name>
+    --vault-addr=<url> --vault-mount=<mount> --vault-path=<path>
+
+  Common:
+    --repo=<name>            override the auto-detected repo name
+    --help, -h               print this help and exit
+
+EXAMPLES
+  # Push dev env to a GitHub repo's environment secrets
+  vsync sync dev gh --gh-repo=acme/web
+
+  # GCP Secret Manager
+  vsync sync prod gcp --gcp-project=acme-prod-1234
+
+  # AWS Secrets Manager, custom prefix
+  vsync sync staging aws --aws-region=us-east-1 --aws-secret-prefix=staging/
+
+  # Azure Key Vault
+  vsync sync prod azure --azure-vault=acme-prod-kv
+
+  # HashiCorp Vault KV v2 — atomic bulk write
+  vsync sync prod vault --vault-addr=https://vault.example.com \\
+    --vault-mount=secret --vault-path=apps/acme/prod
+
+  # Skip locally-only keys and treat _FILE suffix as a file reference
+  vsync sync dev gh --gh-repo=acme/web \\
+    --inline-file-suffix=_FILE --exclude-property=LOCAL_DEV_PORT
+
+EXIT CODES
+  0    every secret synced successfully
+  1    invalid target, missing config, missing binary, parse failure, or
+       one-or-more KV writes failed (failure list printed)
+
+SEE ALSO
+  vsync push(1)            ground-truth seal of the same vault to S3
+  vsync runtime-token(1)   alternative — runtime apps fetch S3 directly
+  docs/specs/v0.7-explicit-sync-parser.md
+  docs/specs/v0.8-multi-target-sync.md
+`;
+
 export async function main(argv: string[]): Promise<void> {
+  if (wantsHelp(argv)) printHelp(HELP);
   const { positional, flags, lists } = parseArgs(argv);
   const env = positional[0];
   const target = positional[1] as TargetName | undefined;

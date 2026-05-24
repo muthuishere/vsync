@@ -7,11 +7,50 @@
 // needed — just the per-repo file with S3 creds).
 
 import { parseArgs } from "../src/argv";
+import { wantsHelp, printHelp } from "../src/help";
 import { getRepoName } from "../src/repo";
 import { loadConfigFile, configFilePath } from "../src/repoconfig";
 import { makeClient } from "../src/s3";
 
+const HELP = `
+NAME
+  vsync versions — list version objects on S3 for this (repo, env)
+
+SYNOPSIS
+  vsync versions <env> [--repo=<name>]
+
+DESCRIPTION
+  Read-only listing of s3://<bucket>/<repo>/<env>/versions/ — one line per
+  <ts>.enc object with size and age, with a leading "*" on whichever
+  version the <env>/latest pointer currently references. Does NOT decrypt
+  anything (no keychain key needed; just the on-disk config with S3 creds).
+
+  Useful for sanity-checking after a push, spotting stale pointers, or
+  finding the timestamp of a specific bundle for forensic restore.
+
+FLAGS
+  --repo=<name>            override the auto-detected repo name
+  --help, -h               print this help and exit
+
+EXAMPLES
+  # List versions for dev
+  vsync versions dev
+
+  # List versions for a specific repo override
+  vsync versions prod --repo=acme-monorepo
+
+EXIT CODES
+  0    listing printed (zero or more versions)
+  1    missing config, S3 listing failed
+
+SEE ALSO
+  vsync push(1)            create a new version
+  vsync pull(1)            download the latest version
+  vsync audit(1)            see who pushed each version, and when
+`;
+
 export async function main(argv: string[]): Promise<void> {
+  if (wantsHelp(argv)) printHelp(HELP);
   const { positional, flags } = parseArgs(argv);
   const env = positional[0];
   if (!env) {

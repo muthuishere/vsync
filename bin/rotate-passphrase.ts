@@ -24,6 +24,7 @@
 // touches shell history.
 
 import { parseArgs } from "../src/argv";
+import { wantsHelp, printHelp } from "../src/help";
 import { getRepoName } from "../src/repo";
 import { loadConfigFile, configFilePath, DEFAULT_AUDIT_ENABLED } from "../src/repoconfig";
 import { ConfigFileMissingError, KeyMissingError } from "../src/envconfig";
@@ -83,7 +84,69 @@ export function __setAuditMock(m: RotateAuditMock | null): void {
 
 // ─── Main ──────────────────────────────────────────────────────────────
 
+const HELP = `
+NAME
+  vsync rotate-passphrase — re-encrypt the latest bundle under a new passphrase
+
+SYNOPSIS
+  vsync rotate-passphrase --env=<env> [--new-passphrase=<pp>] [flags]
+
+DESCRIPTION
+  Atomically re-encrypts the bundle s3://<bucket>/<repo>/<env>/versions/
+  <currentTs>.enc under a new passphrase, writes it as a fresh <newTs>.enc,
+  swaps the <env>/latest pointer (ETag-conditional), bumps the rotation
+  counter in <env>/latest.manifest (gen → gen+1, with prev_gen + rotated_at),
+  and appends an \`action="rotate"\` row to the audit log.
+
+  The old passphrase is required to decrypt the current bundle. It must be
+  supplied via the interactive prompt by default; --old-passphrase=<value>
+  is exposed only for automation / tests (it ends up in shell history).
+  The new passphrase must be at least 12 characters and is confirmed twice
+  on TTY.
+
+  After rotation, apps booting between the swap and the secret-store update
+  will fail to decrypt — this race window is operator-owned (v1 has no
+  built-in bridge). The success banner spells the next steps explicitly.
+
+  See docs/specs/v0.10-runtime-token-cli.md §3.
+
+FLAGS
+  --env=<env>              (required) environment to rotate
+  --new-passphrase=<pp>    new passphrase (>= 12 chars); prompts twice if absent
+  --old-passphrase=<pp>    old passphrase (NOT recommended; for automation)
+  --no-audit               do not append a \`rotate\` row to the audit log
+  --note=<text>            free-form note recorded in the audit row's meta
+  --meta key=value         extra audit-row meta KV (repeatable)
+  --interactive            (always interactive in practice — kept for parity)
+  --repo=<name>            override the auto-detected repo name
+  --help, -h               print this help and exit
+
+EXAMPLES
+  # Interactive — recommended
+  vsync rotate-passphrase --env=prod
+
+  # Automated (CI rotation step; passphrase from a vaulted env var)
+  vsync rotate-passphrase --env=prod \\
+    --old-passphrase="\$PROD_OLD_PP" \\
+    --new-passphrase="\$PROD_NEW_PP" \\
+    --note="quarterly rotation 2026-Q2"
+
+EXIT CODES
+  0    rotation complete; audit row written
+  1    wrong old passphrase, mismatched new, or invalid input
+  2    S3 error during bundle re-upload (step 3)
+  3    manifest pointer / meta swap failed (412 conflict or other)
+  4    rotation succeeded but audit append failed (manual row printed)
+  5    per-(repo, env) config or keychain key missing
+
+SEE ALSO
+  vsync push(1)            create the bundle being rotated
+  vsync audit(1)            see the \`rotate\` rows after the fact
+  docs/specs/v0.10-runtime-token-cli.md
+`;
+
 export async function main(argv: string[]): Promise<void> {
+  if (wantsHelp(argv)) printHelp(HELP);
   const { flags, lists } = parseArgs(argv);
   const env = flags.env;
   if (!env || env === "true") {

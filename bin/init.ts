@@ -25,6 +25,7 @@
 import { existsSync, mkdirSync, renameSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { parseArgs } from "../src/argv";
+import { wantsHelp, printHelp } from "../src/help";
 import { getRepoName, getRepoRoot } from "../src/repo";
 import {
   saveConfigFile,
@@ -42,6 +43,64 @@ import {
   type Profile,
 } from "../src/profiles";
 import { askText, askBool, isTty } from "../src/prompt";
+
+const HELP = `
+NAME
+  vsync init — create a per-(repo, env) config + AES key from a named profile
+
+SYNOPSIS
+  vsync init <env> --profile=<name> [flags]
+
+DESCRIPTION
+  Sets up a fresh (repo, env) pair on this machine: composes the S3 prefix
+  from the named profile, generates a 256-bit AES key, writes the per-repo
+  config file to ~/.config/vsync/<repo>/env_<env> (mode 0600), saves the key
+  to the OS keychain (service tools.vsync / account <repo>/<env>), and
+  creates the vault folder (default infra/vault/<env>). If a root .env.<env>
+  exists it offers to move it into the vault folder. Warns when the vault
+  folder's parent isn't covered by .gitignore.
+
+  On an already-initialised (repo, env) the command refuses on non-TTY and
+  presents a four-way prompt on a TTY (keep / overwrite / edit / abort).
+
+  See docs/specs/v0.13-profiles-init-status.md §3 for the full flow.
+
+FLAGS
+  --profile=<name>         named S3-credential profile to bind to this env
+                           (create with \`vsync profile add\`)
+  --vault-folder=<path>    override the vault folder (default: infra/vault/<env>)
+  --audit=on|off           enable / disable audit-log append for this env
+                           (default: on)
+  --migrate-from=<path>    custom source path for the root-→-vault migration
+                           (default: .env.<env>)
+  --no-migrate             skip the root .env.<env> migration prompt entirely
+  --repo=<name>            override the auto-detected repo name
+  --interactive            force interactive prompts (overrides --audit, vault-folder)
+  --help, -h               print this help and exit
+
+EXAMPLES
+  # Fresh setup from a profile
+  vsync init dev --profile=hetzner-personal
+
+  # Custom vault folder + opt out of audit
+  vsync init prod --profile=acme-prod --vault-folder=secrets/prod --audit=off
+
+  # Re-prompt with current values as defaults
+  vsync init dev --profile=hetzner-personal --interactive
+
+  # Skip the migrate-from-root-env prompt (CI / scripted setup)
+  vsync init dev --profile=hetzner-personal --no-migrate
+
+EXIT CODES
+  0    success (new config + key written, or kept existing on user 'keep')
+  1    invalid input, profile not found, or non-TTY collision
+
+SEE ALSO
+  vsync profile add(1)     create a profile before \`vsync init\` can bind to it
+  vsync push(1)            seal + upload the freshly created vault to S3
+  vsync export(1)          hand off this (repo, env) to a teammate
+  docs/specs/v0.13-profiles-init-status.md
+`;
 
 function envFromArg(env?: string): string {
   if (!env) {
@@ -238,6 +297,7 @@ function promptCorruptExisting(
 }
 
 export async function main(argv: string[]): Promise<void> {
+  if (wantsHelp(argv)) printHelp(HELP);
   const { positional, flags } = parseArgs(argv);
   const env = envFromArg(positional[0]);
   const interactive = flags.interactive === "true";

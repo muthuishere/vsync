@@ -10,6 +10,7 @@
 // Default output path: ./<repo>-<env>.share
 
 import { parseArgs } from "../src/argv";
+import { wantsHelp, printHelp } from "../src/help";
 import { getRepoName } from "../src/repo";
 import { loadConfigFile, configFilePath, DEFAULT_AUDIT_ENABLED } from "../src/repoconfig";
 import { getKey } from "../src/keychain";
@@ -26,7 +27,63 @@ import {
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
+const HELP = `
+NAME
+  vsync export — write a passphrase-encrypted .share file for teammate onboarding
+
+SYNOPSIS
+  vsync export <env> [--out=<path>] [--passphrase=<pp>] [flags]
+
+DESCRIPTION
+  Bundles the on-disk per-repo config (S3 creds, prefix, vault folder) and
+  the keychain-stored AES key into a single passphrase-encrypted .share
+  file. The file is safe to send on any channel (Slack DM, AirDrop, email);
+  the passphrase MUST be sent on a different channel.
+
+  The passphrase is auto-generated if not supplied and printed to stdout
+  (once) for the operator to copy. With --interactive on a TTY the operator
+  can supply a custom passphrase instead.
+
+  Default output path: ./<repo>-<env>.share (mode 0600). If audit is on, a
+  best-effort \`export\` row is appended to the S3 audit log; failures are
+  downgraded to a warning so the share-file is always written.
+
+  The teammate restores with \`vsync import <env> <share-file>\`.
+
+FLAGS
+  --out=<path>             write the .share file at <path>
+                           default: ./<repo>-<env>.share
+  --passphrase=<pp>        use the given passphrase instead of generating one
+                           (not recommended — ends up in shell history)
+  --interactive            prompt for a custom passphrase on a TTY
+  --no-audit               do not append an audit row for this export
+  --note=<text>            free-form note recorded in the audit row's meta
+  --meta key=value         extra audit-row meta KV (repeatable)
+  --repo=<name>            override the auto-detected repo name
+  --help, -h               print this help and exit
+
+EXAMPLES
+  # Simplest case — auto-generated passphrase, default output path
+  vsync export dev
+
+  # Custom output path and passphrase via prompt
+  vsync export prod --out=/tmp/prod.share --interactive
+
+  # Scripted: pass the passphrase via flag (acceptable for CI handoff)
+  vsync export dev --passphrase="\$ONBOARDING_PP"
+
+EXIT CODES
+  0    .share file written; audit row appended (or warning printed)
+  1    missing env, missing config, or missing keychain key
+
+SEE ALSO
+  vsync import(1)          inverse — restore a .share file on another machine
+  vsync init(1)            create a (repo, env) pair without a .share file
+  docs/specs/v0.2-secret-lib.md
+`;
+
 export async function main(argv: string[]): Promise<void> {
+  if (wantsHelp(argv)) printHelp(HELP);
   const { positional, flags, lists } = parseArgs(argv);
   const env = positional[0];
   if (!env) {

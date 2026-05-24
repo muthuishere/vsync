@@ -11,6 +11,7 @@
 // (repo, env). See docs/specs/v0.13-profiles-init-status.md §1-2.
 
 import { parseArgs } from "../src/argv";
+import { wantsHelp, printHelp } from "../src/help";
 import {
   loadProfile,
   saveProfile,
@@ -294,7 +295,70 @@ async function cmdRemove(
   );
 }
 
+const HELP = `
+NAME
+  vsync profile — manage named S3-credential profiles
+
+SYNOPSIS
+  vsync profile list
+  vsync profile show <name> [--reveal-secret]
+  vsync profile add  <name>
+  vsync profile remove <name> [--yes]
+
+DESCRIPTION
+  A profile is a named bag of S3 credentials (endpoint, region, bucket,
+  access key, secret key, optional prefix) stored at
+  ~/.config/vsync/profiles/<name>.json (mode 0600). \`vsync init\` binds a
+  (repo, env) pair to one profile at setup time and copies the creds into
+  the per-(repo, env) config, so removing a profile later does NOT break
+  envs that already reference it — but future inits with that profile name
+  will fail.
+
+  See docs/specs/v0.13-profiles-init-status.md §1-2.
+
+  Verbs:
+    list                   table of name / endpoint / bucket
+    show <name>            full record (secret masked unless --reveal-secret)
+    add  <name>            interactive create (refuses on non-TTY by design)
+    remove <name>          delete the profile (refuses without --yes or prompt)
+
+FLAGS
+  --reveal-secret          (show) print the secret access key in cleartext
+                           on a TTY only, after a confirmation prompt
+  --yes                    (remove) skip the confirmation prompt
+  --help, -h               print this help and exit
+
+EXAMPLES
+  # See what profiles exist
+  vsync profile list
+
+  # Inspect one (secret masked)
+  vsync profile show hetzner-personal
+
+  # Inspect with secret revealed (TTY-only, gated by confirm)
+  vsync profile show hetzner-personal --reveal-secret
+
+  # Create a profile interactively
+  vsync profile add acme-prod
+
+  # Remove with confirmation prompt
+  vsync profile remove old-personal
+
+  # Remove without prompting (scripts / CI)
+  vsync profile remove old-personal --yes
+
+EXIT CODES
+  0    success
+  1    missing / invalid name, missing TTY where required, or profile collision
+
+SEE ALSO
+  vsync init(1)            bind a (repo, env) to one of these profiles
+  vsync status(1)          spot envs whose profile has since been removed
+  docs/specs/v0.13-profiles-init-status.md
+`;
+
 export async function main(argv: string[]): Promise<void> {
+  if (wantsHelp(argv)) printHelp(HELP);
   const { positional, flags } = parseArgs(argv);
   const verb = positional[0];
 

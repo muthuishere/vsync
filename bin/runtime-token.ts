@@ -16,6 +16,7 @@
 import { gzipSync } from "node:zlib";
 
 import { parseArgs } from "../src/argv";
+import { wantsHelp, printHelp } from "../src/help";
 import { getRepoName } from "../src/repo";
 import { loadConfigFile } from "../src/repoconfig";
 import { ConfigFileMissingError } from "../src/envconfig";
@@ -107,7 +108,76 @@ type BlobJson = {
 
 const DEFAULT_PBKDF2_ITERATIONS = 600_000;
 
+const HELP = `
+NAME
+  vsync runtime-token — mint the VSYNC_CONFIG bootstrap blob for runtime libs
+
+SYNOPSIS
+  vsync runtime-token --env=<env> [flags]
+
+DESCRIPTION
+  Produces the gzipped + base64url blob that an application running in
+  production reads from \`process.env.VSYNC_CONFIG\` to bootstrap the
+  runtime library. The blob carries: S3 endpoint / region / bucket /
+  access key / secret key, prefix, env, PBKDF2 salt, iteration count.
+
+  Stdout is the blob and ONLY the blob (so \`| pbcopy\` and pipes work);
+  every progress / warning line goes to stderr. By default the command
+  HEADs <prefix>manifest with the supplied creds to validate them before
+  emitting the blob; --no-validate skips that round-trip.
+
+  --json prints the JSON payload to stderr alongside the blob (cleartext
+  secret — operator-confirmed debugging only). A profile can pre-fill any
+  field; flags always win; on-disk config is the last fallback.
+
+  See docs/specs/v0.10-runtime-token-cli.md §2.
+
+FLAGS
+  --env=<env>              (required) environment name; lowercase
+  --access-key=<id>        override the access key
+  --secret-key=<key>       override the secret access key
+  --bucket=<name>          override the S3 bucket
+  --endpoint=<url>         override the S3 endpoint
+  --region=<region>        override the S3 region
+  --prefix=<prefix>        override the S3 prefix
+  --profile=<name>         pre-fill fields from a named profile
+  --no-validate            skip the manifest HEAD validation
+  --json                   also dump the JSON payload to stderr (cleartext)
+  --interactive            prompt for creds even when flags suffice
+  --repo=<name>            override the auto-detected repo name
+  --help, -h               print this help and exit
+
+EXAMPLES
+  # Mint the blob, validating creds first
+  vsync runtime-token --env=prod
+
+  # Copy directly to the clipboard (macOS)
+  vsync runtime-token --env=prod | pbcopy
+
+  # Skip validation (offline / unreachable bucket)
+  vsync runtime-token --env=prod --no-validate
+
+  # Use a profile to fill defaults, override the prefix
+  vsync runtime-token --env=prod --profile=acme-prod --prefix=apps/web/
+
+  # Dump the JSON payload too (debugging — secret in cleartext)
+  vsync runtime-token --env=prod --json
+
+EXIT CODES
+  0    blob emitted (validation passed, or skipped, or notfound warning)
+  1    invalid input (missing --env, bad env name, missing creds)
+  2    creds accepted but cannot read <prefix>manifest — IAM issue
+  3    endpoint unreachable
+  4    no per-(repo, env) config file on disk
+
+SEE ALSO
+  vsync rotate-passphrase(1) re-encrypt the bundle the blob unlocks
+  vsync push(1)            seed <prefix>manifest before booting apps
+  docs/specs/v0.10-runtime-token-cli.md
+`;
+
 export async function main(argv: string[]): Promise<void> {
+  if (wantsHelp(argv)) printHelp(HELP);
   const { flags } = parseArgs(argv);
   const env = flags.env;
   if (!env || env === "true") {

@@ -10,6 +10,7 @@ import { existsSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "../src/argv";
+import { wantsHelp, printHelp } from "../src/help";
 import { getRepoName, getRepoRoot } from "../src/repo";
 import { loadEnvConfig, resolveVaultFolder } from "../src/envconfig";
 import { loadConfigFile, DEFAULT_AUDIT_ENABLED } from "../src/repoconfig";
@@ -25,7 +26,59 @@ import {
   makeAuditClient,
 } from "../src/audit";
 
+const HELP = `
+NAME
+  vsync pull — download + decrypt + unpack the latest vault folder from S3
+
+SYNOPSIS
+  vsync pull <env> [--repo=<name>] [audit flags]
+
+DESCRIPTION
+  Reads the per-(repo, env) config + keychain key, backs up the current
+  local vault folder (encrypted with the same envelope as the S3 bundle),
+  reads the s3://<bucket>/<repo>/<env>/latest pointer, downloads the
+  matching <ts>.enc bundle, decrypts it, verifies the embedded manifest
+  timestamp matches the pointer (defeats rename-attacks), and unpacks the
+  zip into the repo root.
+
+  The destination is the vault folder configured at \`vsync init\` time
+  (cfg.files.vaultFolder ?? infra/vault/<env>). A best-effort \`pull\` row
+  is appended to the audit log unless --no-audit or the per-env audit
+  opt-out is set.
+
+FLAGS
+  --no-audit               do not append an audit row for this pull
+  --note=<text>            free-form note recorded in the audit row's meta
+  --meta key=value         extra audit-row meta KV (repeatable)
+  --repo=<name>            override the auto-detected repo name
+  --help, -h               print this help and exit
+
+ENVIRONMENT
+  VSYNC_AUDIT_NOTE         fallback for --note=<text>
+  VSYNC_AUDIT_META         fallback for --meta KVs (JSON object)
+
+EXAMPLES
+  # Daily pull
+  vsync pull dev
+
+  # Pull with a note recorded in the audit log
+  vsync pull prod --note="picking up team-mate's secret rotation"
+
+  # CI pull, skip the audit append
+  vsync pull staging --no-audit
+
+EXIT CODES
+  0    bundle pulled, decrypted, and unpacked successfully
+  1    missing config / key, empty pointer, decrypt failure, or tampered manifest
+
+SEE ALSO
+  vsync push(1)            inverse — encrypt + upload the local vault
+  vsync versions(1)        list versions on S3 without pulling them
+  vsync use(1)              symlink ./.env to the vault's .env.<env>
+`;
+
 export async function main(argv: string[]): Promise<void> {
+  if (wantsHelp(argv)) printHelp(HELP);
   const { positional, flags, lists } = parseArgs(argv);
   const env = positional[0];
   if (!env) {

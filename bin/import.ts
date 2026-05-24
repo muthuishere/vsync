@@ -9,6 +9,7 @@
 // After import you're ready to `vsync pull <env>` / `push <env>`.
 
 import { parseArgs } from "../src/argv";
+import { wantsHelp, printHelp } from "../src/help";
 import { getRepoName } from "../src/repo";
 import { saveConfigFile, configFilePath, DEFAULT_AUDIT_ENABLED } from "../src/repoconfig";
 import { setKey } from "../src/keychain";
@@ -23,7 +24,62 @@ import {
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
+const HELP = `
+NAME
+  vsync import — restore a .share file into local config + keychain
+
+SYNOPSIS
+  vsync import <env> [<share-file>] [--passphrase=<pp>] [flags]
+
+DESCRIPTION
+  Reads the encrypted .share file produced by \`vsync export\`, prompts for
+  (or accepts via flag) the passphrase, decrypts the inner payload, and
+  installs:
+
+    - the per-repo config to ~/.config/vsync/<repo>/env_<env> (0600)
+    - the encryption key into the OS keychain (tools.vsync / <repo>/<env>)
+
+  After a successful import you're ready to \`vsync pull <env>\`. The repo
+  name embedded in the .share file is the default; pass --repo=<name> to
+  remap to a different repo namespace on this machine.
+
+  The .share file can be safely deleted after import — its contents are
+  installed. If audit is on, a best-effort \`import\` row is appended to
+  the S3 audit log.
+
+FLAGS
+  --passphrase=<pp>        use the given passphrase instead of prompting
+                           (not recommended outside CI — shell history)
+  --file=<path>            same as the positional <share-file>; mutually
+                           exclusive in practice
+  --repo=<name>            override the repo embedded in the .share file
+  --no-audit               do not append an audit row for this import
+  --note=<text>            free-form note recorded in the audit row's meta
+  --meta key=value         extra audit-row meta KV (repeatable)
+  --help, -h               print this help and exit
+
+EXAMPLES
+  # Common case — teammate-sent file, passphrase via prompt
+  vsync import dev ./myapp-dev.share
+
+  # Scripted onboarding — passphrase via flag
+  vsync import dev ./myapp-dev.share --passphrase="\$ONBOARDING_PP"
+
+  # Remap a .share file from one repo namespace into another
+  vsync import dev ./other-dev.share --repo=local-myapp
+
+EXIT CODES
+  0    config + key installed successfully
+  1    wrong passphrase, missing file, or no TTY when prompt required
+
+SEE ALSO
+  vsync export(1)          create the .share file on the source machine
+  vsync pull(1)             download the latest vault folder after import
+  docs/specs/v0.2-secret-lib.md
+`;
+
 export async function main(argv: string[]): Promise<void> {
+  if (wantsHelp(argv)) printHelp(HELP);
   const { positional, flags, lists } = parseArgs(argv);
   const env = positional[0];
   let filePath = positional[1] ?? flags.file;

@@ -10,6 +10,7 @@ import { existsSync, statSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "../src/argv";
+import { wantsHelp, printHelp } from "../src/help";
 import { getRepoName, getRepoRoot } from "../src/repo";
 import { loadEnvConfig, resolveVaultFolder } from "../src/envconfig";
 import { loadConfigFile, DEFAULT_AUDIT_ENABLED } from "../src/repoconfig";
@@ -25,7 +26,60 @@ import {
   makeAuditClient,
 } from "../src/audit";
 
+const HELP = `
+NAME
+  vsync push — encrypt + upload the local vault folder to S3
+
+SYNOPSIS
+  vsync push <env> [--repo=<name>] [audit flags]
+
+DESCRIPTION
+  Reads the per-(repo, env) config + keychain key, zips the resolved vault
+  folder (cfg.files.vaultFolder ?? infra/vault/<env>), wraps the zip in a
+  pointer-sealed manifest (magic RQEM0001 — embeds the version timestamp
+  to defeat rename-attacks), encrypts the result with AES-256-GCM
+  (magic RQE1, PBKDF2-SHA256 600k iters), and uploads to:
+
+    s3://<bucket>/<repo>/<env>/versions/<ts>.enc
+    s3://<bucket>/<repo>/<env>/latest    <- pointer text file (<ts>)
+
+  A best-effort \`push\` row is appended to the audit log unless --no-audit
+  or the per-env audit opt-out is set. The inverse is \`vsync pull <env>\`.
+
+FLAGS
+  --no-audit               do not append an audit row for this push
+  --note=<text>            free-form note recorded in the audit row's meta
+  --meta key=value         extra audit-row meta KV (repeatable)
+  --repo=<name>            override the auto-detected repo name
+  --help, -h               print this help and exit
+
+ENVIRONMENT
+  VSYNC_AUDIT_NOTE         fallback for --note=<text>
+  VSYNC_AUDIT_META         fallback for --meta KVs (JSON object)
+
+EXAMPLES
+  # Daily push
+  vsync push dev
+
+  # Push with a note attached to the audit row
+  vsync push prod --note="hot-fix for #1423"
+
+  # CI push, audit row skipped (audit handled out-of-band)
+  vsync push staging --no-audit
+
+EXIT CODES
+  0    bundle uploaded; pointer swapped; audit row appended (or warning)
+  1    missing config / key, missing vault folder, or S3 error
+
+SEE ALSO
+  vsync pull(1)            inverse — download + decrypt + unpack
+  vsync versions(1)        list available versions on S3
+  vsync audit(1)            inspect the append-only audit log
+  vsync rotate-passphrase(1) re-encrypt the bundle under a new passphrase
+`;
+
 export async function main(argv: string[]): Promise<void> {
+  if (wantsHelp(argv)) printHelp(HELP);
   const { positional, flags, lists } = parseArgs(argv);
   const env = positional[0];
   if (!env) {
