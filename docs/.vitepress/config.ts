@@ -9,17 +9,35 @@ export default defineConfig({
   cleanUrls: true,
   lastUpdated: true,
 
+  // The test-vectors corpus contains READMEs intended for GitHub browsing only —
+  // its category dirs ship without index.md files, which would otherwise trigger
+  // dead-link errors during the docs build. Exclude from the site build.
+  srcExclude: ["**/test-vectors/**"],
+
+  // Spec docs use angle-bracket placeholders like <env>, <name>, <repo>, <accountid>
+  // inside code blocks and inline code. markdown-it's HTML pass-through otherwise
+  // leaves them as live HTML and Vue's parser aborts the build complaining of
+  // unclosed tags. Disable raw HTML so markdown-it escapes them at the source.
+  markdown: {
+    html: false,
+  },
+
   themeConfig: {
     siteTitle: "Vsync",
 
     nav: [
       { text: "Guide", link: "/guide/quickstart" },
+      { text: "Libraries", link: "/libraries/" },
       { text: "Architecture", link: "/architecture/mental-model" },
       {
-        text: "0.8.0",
+        text: "0.11.0",
         items: [
           { text: "Changelog", link: "/guide/versioning" },
-          { text: "npm", link: "https://www.npmjs.com/package/@muthuishere/vsync" },
+          { text: "npm — CLI", link: "https://www.npmjs.com/package/@muthuishere/vsync" },
+          { text: "npm — TS lib", link: "https://www.npmjs.com/package/@muthuishere/vsync-s3-client" },
+          { text: "PyPI — Python lib", link: "https://pypi.org/project/vsync-s3-client/" },
+          { text: "pkg.go.dev — Go lib", link: "https://pkg.go.dev/github.com/muthuishere/vsync/libraries/go" },
+          { text: "Maven Central — Java lib", link: "https://central.sonatype.com/artifact/io.github.muthuishere/vsync-s3-client" },
           { text: "GitHub", link: "https://github.com/muthuishere/vsync" },
         ],
       },
@@ -40,6 +58,7 @@ export default defineConfig({
             { text: "What lives in the vault", link: "/guide/vault" },
             { text: "Switching envs — `vsync use`", link: "/guide/use" },
             { text: "Push / pull / versions", link: "/guide/daily" },
+            { text: "Profiles", link: "/guide/profiles" },
           ],
         },
         {
@@ -47,6 +66,7 @@ export default defineConfig({
           items: [
             { text: "Onboarding teammates", link: "/guide/share" },
             { text: "Fanout to where prod runs", link: "/guide/sync" },
+            { text: "Runtime tokens & rotation", link: "/guide/runtime-token" },
             { text: "Audit log", link: "/guide/audit" },
           ],
         },
@@ -56,6 +76,23 @@ export default defineConfig({
             { text: "Command reference", link: "/guide/commands" },
             { text: "Troubleshooting", link: "/guide/troubleshooting" },
             { text: "Versioning", link: "/guide/versioning" },
+          ],
+        },
+      ],
+
+      "/libraries/": [
+        {
+          text: "Runtime libraries",
+          items: [
+            { text: "Overview & quickstart", link: "/libraries/" },
+          ],
+        },
+        {
+          text: "Specs",
+          items: [
+            { text: "Lib API (v0.12)", link: "/specs/v0.12-vsync-s3-client" },
+            { text: "Conformance vectors (v0.11)", link: "/specs/v0.11-conformance-test-vectors" },
+            { text: "Runtime-token CLI (v0.10)", link: "/specs/v0.10-runtime-token-cli" },
           ],
         },
       ],

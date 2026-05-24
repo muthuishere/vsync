@@ -29,6 +29,9 @@ features:
   - icon: ↗️
     title: Fanout to where prod runs
     details: '`vsync sync <env> <gh|gcp|aws|azure|vault>` pushes the same `.env.<env>` keys to any of five backends — GitHub Actions, GCP Secret Manager, AWS Secrets Manager, Azure Key Vault, or HashiCorp Vault KV v2. One edit in the vault; every target stays in step.'
+  - icon: 📦
+    title: Read it from your app — Python, TS, Go, Java
+    details: '`vsync-s3-client` ships in four languages, all at 0.11.0, all behaviorally identical. Two env vars (`VSYNC_CONFIG` + `VSYNC_PASSPHRASE`), one S3 round trip at boot, in-memory `get/source/asset_path` accessor with a deterministic vault → env → default fallback chain. <a href="/vsync/libraries/">Browse the libs →</a>'
   - icon: 📜
     title: Append-only audit log
     details: Every push / pull / import / export records `who, where, when, version, free-form note` to a CSV on the bucket. `vsync audit <env>` prints it. CI tags rows with `--note="run #1234"`.
@@ -55,7 +58,11 @@ Requires Bun ≥ 1.2.21 on PATH (for `Bun.secrets`). Don't want to install? `bun
 ## The two-minute version
 
 ```bash
-vsync init dev                              # generate per-(repo, env) key + config
+# One-time per machine — name your S3 bucket once, reuse across projects
+vsync profile add hetzner-personal          # endpoint, bucket, IAM key
+
+# Per repo + env
+vsync init dev --profile=hetzner-personal   # generate per-(repo, env) key + config
 echo "DB_URL=postgres://…" > infra/vault/dev/.env.dev
 vsync push dev                              # encrypt + upload to S3
 
@@ -72,6 +79,11 @@ vsync push dev                              # I edited a secret
 vsync pull dev                              # what did the team change?
 vsync sync dev gh                           # push .env.dev keys to GitHub Actions
 vsync audit dev                             # who touched what, when
+vsync status                                # what's set up on this machine
+
+# Production app — mint a bootstrap token for the runtime libs
+vsync runtime-token --env=prod              # → vsync-cfg-v1:H4sIAAAA...
+# Paste into your platform's secret store as VSYNC_CONFIG.
 ```
 
 [Full quickstart →](/guide/quickstart) · [Architecture →](/architecture/mental-model)
