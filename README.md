@@ -91,9 +91,9 @@ One edit in the vault; every place that needs the secret stays in step. [Sync ta
 ## What's in the box
 
 - **CLI** at `bin/vsync.ts` (Bun-native, ships as `@muthuishere/vsync` on npm)
-- **Runtime libraries** at `libraries/{python,typescript,go,java}/` — all at `v0.11.0`, all behaviorally identical
+- **Runtime libraries** at `libraries/{python,typescript,go,java}/` — at `v0.11.0` (catch up to CLI's `0.12.0` in next release), all behaviorally identical
 - **Conformance corpus** at `docs/specs/test-vectors/` — every library passes the same 31 vectors
-- **Specs** at `docs/specs/` — versioned design notes (v0.2 envelope, v0.4 audit log, v0.10 CLI verbs, v0.11 test vectors, v0.12 runtime lib API, v0.13 profile system)
+- **Specs** at `docs/specs/` — versioned design notes (v0.2 envelope, v0.4 audit log, v0.10 CLI verbs, v0.11 test vectors, v0.12 runtime lib API, v0.13 profile system, v0.16 git-only identity + `.vsync` pin, v0.17 pull-safety ledger)
 - **Site** at `docs/` — VitePress, auto-deployed to <https://muthuishere.github.io/vsync/>
 
 ---
@@ -108,8 +108,9 @@ One edit in the vault; every place that needs the secret stays in step. [Sync ta
 
 ## Versioning
 
-Current release: **`0.11.0`** — unified across the CLI and all four runtime libraries.
+Current CLI release: **`0.12.0`**. Runtime libraries are at `0.11.0` and will catch up to `0.12.0` when the v0.15 lib redesign lands.
 
+- `0.12.0` **Breaking.** Git is now a precondition — every subcommand errors outside a git tree. `SECRETS_SYNC_REPO` is gone (use `--repo=<name>`). New committed `.vsync` identity pin file ([v0.16](docs/specs/v0.16-repo-identity-git-only.md)). `vsync pull` refuses on unsynced local edits; `vsync push` refuses when remote has advanced — `--backup` / `--force` escape hatches ([v0.17](docs/specs/v0.17-pull-safety.md)). New typed errors render without stack traces. `vsync status` adds a prefix block showing identity source.
 - `0.11.0` Profile system replaces single defaults. New `vsync runtime-token`, `vsync rotate-passphrase`, `vsync status` subcommands. Four runtime libraries: Python (reference impl), TypeScript, Go, Java. Detailed `--help` on every subcommand. [Upgrade notes →](https://muthuishere.github.io/vsync/guide/upgrade-to-0.11)
 - `0.8.0` Multi-target sync — `aws`, `azure`, `vault` joined `gh`, `gcp`. [`docs/specs/v0.8-multi-target-sync.md`](docs/specs/v0.8-multi-target-sync.md)
 - `0.7.0` Explicit `vsync sync` parser — no implicit policy. [`docs/specs/v0.7-explicit-sync-parser.md`](docs/specs/v0.7-explicit-sync-parser.md)
