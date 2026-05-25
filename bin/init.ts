@@ -27,6 +27,7 @@ import { join, dirname } from "node:path";
 import { parseArgs } from "../src/argv";
 import { wantsHelp, printHelp } from "../src/help";
 import { getRepoName, getRepoRoot } from "../src/repo";
+import { writeVsyncFile } from "../src/vsyncfile";
 import {
   saveConfigFile,
   loadConfigFile,
@@ -443,6 +444,13 @@ export async function main(argv: string[]): Promise<void> {
   const key = generateKey();
   await setKey(repo, env, key);
 
+  // Write / verify the committed `.vsync` identity pin (v0.16).
+  // No-op if it already exists and matches; throws VsyncFileClobberError if
+  // an existing pin's `repo=` differs (caught at bin/vsync.ts and rendered
+  // cleanly). The resolver already validated this on the way in, so a write
+  // here is either the first write or a no-op.
+  const vsyncWrite = writeVsyncFile(root, repo);
+
   // Ensure the vault folder exists.
   const absVault = join(root, vaultFolder);
   mkdirSync(absVault, { recursive: true });
@@ -462,14 +470,28 @@ export async function main(argv: string[]): Promise<void> {
   );
   console.log(`  profile:     ${profileName}`);
   console.log(`  prefix:      ${prefix}`);
-  console.log(`  vault:       ${absVault}\n`);
+  console.log(`  vault:       ${absVault}`);
+  if (vsyncWrite.written) {
+    console.log(
+      `  .vsync:      ${root}/.vsync (identity pin — please commit)`,
+    );
+  }
+  console.log("");
   console.log("In your app, point dotenv (or equivalent) at the vault:");
   console.log(`  dotenv.config({ path: \`${vaultFolder}/.env.\${env}\` });\n`);
   console.log("Next steps:");
-  console.log(`  1. Put your secrets into ${vaultFolder}/.env.${env} (and any vault files alongside).`);
-  console.log(`  2. Push to S3:`);
+  let step = 1;
+  if (vsyncWrite.written) {
+    console.log(`  ${step}. Commit the identity pin so teammates resolve to the same repo:`);
+    console.log(`        git add .vsync && git commit -m "vsync: add identity pin"`);
+    step++;
+  }
+  console.log(`  ${step}. Put your secrets into ${vaultFolder}/.env.${env} (and any vault files alongside).`);
+  step++;
+  console.log(`  ${step}. Push to S3:`);
   console.log(`        vsync push ${env}`);
-  console.log(`  3. Share with a teammate (one file + one passphrase, sent on different channels):`);
+  step++;
+  console.log(`  ${step}. Share with a teammate (one file + one passphrase, sent on different channels):`);
   console.log(`        vsync export ${env}`);
   console.log(`     They'll run:`);
   console.log(`        vsync import ${env} <share-file>`);

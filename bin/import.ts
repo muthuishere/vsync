@@ -10,7 +10,8 @@
 
 import { parseArgs } from "../src/argv";
 import { wantsHelp, printHelp } from "../src/help";
-import { getRepoName } from "../src/repo";
+import { getRepoNameForImport, getRepoRoot } from "../src/repo";
+import { writeVsyncFile, ShareRepoMismatchError } from "../src/vsyncfile";
 import { saveConfigFile, configFilePath, DEFAULT_AUDIT_ENABLED } from "../src/repoconfig";
 import { setKey } from "../src/keychain";
 import { parseShareFile } from "../src/sharefile";
@@ -129,12 +130,39 @@ export async function main(argv: string[]): Promise<void> {
     process.exit(1);
   }
 
+  // Resolve final repo via the v0.16 import precedence:
+  //   1. --repo flag (one-shot rename)
+  //   2. .vsync at git toplevel (committed team contract)
+  //   3. share file's embedded repo (default)
+  // File-vs-share mismatch (no flag) → ShareRepoMismatchError.
+  // Flag-vs-file mismatch → VsyncFileClobberError (from getRepoNameForImport).
+  const root = await getRepoRoot();
+  let repo: string;
+  try {
+    repo = await getRepoNameForImport({
+      override: repoOverride,
+      root,
+      shareRepo: payload.repo,
+    });
+  } catch (err) {
+    if (err instanceof ShareRepoMismatchError) {
+      // Re-throw with the share path now that we know it.
+      throw new ShareRepoMismatchError(
+        err.vsyncPath,
+        absPath,
+        err.pinnedRepo,
+        err.shareRepo,
+      );
+    }
+    throw err;
+  }
+
   if (repoOverride && repoOverride !== payload.repo) {
     console.log(
       `[notice] --repo=${repoOverride} overrides repo embedded in share file (${payload.repo})`,
     );
   }
-  const repo = repoOverride || payload.repo;
+
   const finalEnv = payload.env || env;
   if (payload.env !== env) {
     console.log(
@@ -145,13 +173,24 @@ export async function main(argv: string[]): Promise<void> {
   const saved = await saveConfigFile(repo, env, payload.config);
   await setKey(repo, env, payload.key);
 
+  // Write `.vsync` (v0.16) — no-op if it already exists and matches.
+  // The resolver already ruled out the clobber/share-mismatch cases above,
+  // so the write either creates the file or returns { written: false }.
+  const vsyncWrite = writeVsyncFile(root, repo);
+
   console.log("\n─────────────────────────────────────────────────────────────");
   console.log("✅ Import complete");
   console.log("─────────────────────────────────────────────────────────────\n");
   console.log(`  config file: ${saved}`);
   console.log(
-    `  key:         OS keychain (service=tools.vsync, account=${repo}/${env})\n`,
+    `  key:         OS keychain (service=tools.vsync, account=${repo}/${env})`,
   );
+  if (vsyncWrite.written) {
+    console.log(
+      `  .vsync:      ${root}/.vsync (identity pin — please commit)`,
+    );
+  }
+  console.log("");
   console.log("Next step:");
   console.log(`  vsync pull ${env}   # download the latest vault folder from S3`);
   console.log("");

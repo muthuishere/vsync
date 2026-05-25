@@ -14,7 +14,7 @@
 
 import { parseArgs } from "../src/argv";
 import { wantsHelp, printHelp } from "../src/help";
-import { getRepoName } from "../src/repo";
+import { resolveRepoWithSource } from "../src/repo";
 import { gatherStatus, type StatusReport } from "../src/status";
 
 const HELP = `
@@ -73,7 +73,23 @@ SEE ALSO
 /** Render the human-readable tabular output as a single string. */
 export function renderStatusText(report: StatusReport): string {
   const lines: string[] = [];
-  lines.push(`Repo: ${report.repo}`);
+  // v0.16 prefix block — repo identity, source, toplevel, cwd, origin.
+  const sourceLabel = sourceDisplay(report.source, report.sourceDetail);
+  lines.push(`Repo:     ${report.repo}`);
+  lines.push(`Source:   ${sourceLabel}`);
+  lines.push(`Toplevel: ${report.toplevel}`);
+  if (report.cwd !== report.toplevel) {
+    lines.push(`CWD:      ${report.cwd}`);
+  }
+  lines.push(`Origin:   ${report.originUrl ?? "(not set)"}`);
+  if (report.worktree) {
+    const branchHint = report.worktree.branch
+      ? `${report.worktree.branch} `
+      : "";
+    lines.push(
+      `Worktree: ${branchHint}(linked from ${report.worktree.mainToplevel})`,
+    );
+  }
   lines.push("");
 
   if (report.envs.length === 0) {
@@ -153,6 +169,12 @@ export function renderStatusText(report: StatusReport): string {
 export function renderStatusJson(report: StatusReport): string {
   const payload = {
     repo: report.repo,
+    source: report.source,
+    sourceDetail: report.sourceDetail,
+    toplevel: report.toplevel,
+    cwd: report.cwd,
+    originUrl: report.originUrl,
+    worktree: report.worktree,
     envs: report.envs.map((e) => ({
       env: e.env,
       profile: e.profile ?? null,
@@ -173,6 +195,20 @@ export function renderStatusJson(report: StatusReport): string {
   return JSON.stringify(payload, null, 2);
 }
 
+function sourceDisplay(
+  source: "flag" | "file" | "auto",
+  detail: string,
+): string {
+  switch (source) {
+    case "flag":
+      return `flag (${detail})`;
+    case "file":
+      return `file (${detail})`;
+    case "auto":
+      return `auto (${detail})`;
+  }
+}
+
 export async function main(argv: string[]): Promise<void> {
   if (wantsHelp(argv)) printHelp(HELP);
   const { flags } = parseArgs(argv);
@@ -185,8 +221,18 @@ export async function main(argv: string[]): Promise<void> {
     process.exit(1);
   }
 
-  const repo = await getRepoName({ override: flags.repo });
-  const report = await gatherStatus(repo, { checkRemote: wantCheckRemote });
+  const resolution = await resolveRepoWithSource({ override: flags.repo });
+  const report = await gatherStatus(resolution.repo, {
+    checkRemote: wantCheckRemote,
+    resolution: {
+      source: resolution.source,
+      sourceDetail: resolution.sourceDetail,
+      toplevel: resolution.toplevel,
+      cwd: resolution.cwd,
+      originUrl: resolution.originUrl,
+      worktree: resolution.worktree,
+    },
+  });
 
   if (wantJson) {
     console.log(renderStatusJson(report));

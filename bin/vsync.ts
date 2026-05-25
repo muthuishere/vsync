@@ -4,8 +4,12 @@
 // All subcommands accept (and many require):
 //   <env>            positional — lowercase: dev, local, production, …
 //   --repo=<name>    override the auto-detected repo name
-//                    (env SECRETS_SYNC_REPO → package.json::name → git basename → cwd)
+//                    (resolved from .vsync file → parsed git remote origin URL)
+//                    Refuses to clobber a present .vsync that differs.
 //   --interactive    force interactive prompts even when flags provided
+//
+// vsync requires a git repository (see docs/specs/v0.16-repo-identity-git-only.md).
+// Outside a git tree, every subcommand errors with NotInGitRepoError.
 //
 // Designed for `bunx @muthuishere/vsync <subcommand> ...`.
 
@@ -79,8 +83,8 @@ function usage(code = 0): never {
   out("  Every subcommand accepts:");
   out("    --help, -h                    print detailed reference + examples and exit");
   out("    --repo=<name>                 override the auto-detected repo name");
-  out("                                  (defaults: $SECRETS_SYNC_REPO → package.json::name");
-  out("                                   → git basename → cwd basename)");
+  out("                                  (default: .vsync file → parsed git remote origin URL)");
+  out("                                  Refuses to clobber a present .vsync that differs.");
   out("    --interactive                 force interactive prompts (where supported)");
   out("");
   out("Run `vsync <subcommand> --help` for detailed flags, examples, and exit codes.");
@@ -97,7 +101,24 @@ if (!SUBCOMMANDS.includes(subcommand as Subcommand)) {
   usage(1);
 }
 
-switch (subcommand as Subcommand) {
+// Typed-error names that should be printed cleanly (no stack trace) at the
+// top level. Each error's message field is already operator-facing.
+const CLEAN_ERROR_NAMES = new Set([
+  // v0.16 — repo identity
+  "NotInGitRepoError",
+  "RepoIdentityUnresolvedError",
+  "VsyncFileMalformedError",
+  "VsyncFileClobberError",
+  "ShareRepoMismatchError",
+  // v0.17 — pull safety / ledger
+  "LocalDirtyError",
+  "RemoteAheadError",
+  "LedgerMalformedError",
+  "SymlinkInVaultError",
+]);
+
+async function dispatch(): Promise<void> {
+  switch (subcommand as Subcommand) {
   case "init": {
     const { main } = await import("./init");
     await main(subArgv);
@@ -168,4 +189,15 @@ switch (subcommand as Subcommand) {
     await main(subArgv);
     break;
   }
+  }
+}
+
+try {
+  await dispatch();
+} catch (err) {
+  if (err instanceof Error && CLEAN_ERROR_NAMES.has(err.name)) {
+    console.error(err.message);
+    process.exit(1);
+  }
+  throw err;
 }

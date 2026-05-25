@@ -19,6 +19,7 @@ import type { StatusReport } from "../src/status";
 import { saveConfigFile, type ConfigFile } from "../src/repoconfig";
 import { saveProfile, type Profile } from "../src/profiles";
 import { setKey, deleteKey } from "../src/keychain";
+import { setupTestRepo, type TestRepoHandle } from "./helpers/test-repo";
 
 const TEST_REPO = "vsync_status_bin_test";
 
@@ -47,24 +48,23 @@ const sampleProfile: Profile = {
 
 let tmpRoot: string;
 let prevXdg: string | undefined;
-let prevSecretsRepo: string | undefined;
+let repoHandle: TestRepoHandle;
 
 beforeAll(() => {
   tmpRoot = mkdtempSync(join(tmpdir(), "vsync-bin-status-"));
   prevXdg = process.env.XDG_CONFIG_HOME;
   process.env.XDG_CONFIG_HOME = tmpRoot;
-  prevSecretsRepo = process.env.SECRETS_SYNC_REPO;
-  process.env.SECRETS_SYNC_REPO = TEST_REPO;
+  // v0.16: ephemeral git repo + .vsync pin so resolver returns TEST_REPO.
+  repoHandle = setupTestRepo(TEST_REPO);
 });
 
 afterAll(async () => {
   if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
   else process.env.XDG_CONFIG_HOME = prevXdg;
-  if (prevSecretsRepo === undefined) delete process.env.SECRETS_SYNC_REPO;
-  else process.env.SECRETS_SYNC_REPO = prevSecretsRepo;
   for (const env of ["dev", "prod", "staging", "qa"]) {
     await deleteKey(TEST_REPO, env);
   }
+  repoHandle.restore();
   rmSync(tmpRoot, { recursive: true, force: true });
 });
 
@@ -81,6 +81,12 @@ const emptyReport: StatusReport = {
   profiles: [],
   notices: [],
   keychainEnumerationSupported: true,
+  source: "file",
+  sourceDetail: "/tmp/test/.vsync",
+  toplevel: "/tmp/test",
+  cwd: "/tmp/test",
+  originUrl: null,
+  worktree: null,
 };
 
 describe("renderStatusText", () => {

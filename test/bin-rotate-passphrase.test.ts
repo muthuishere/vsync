@@ -54,22 +54,21 @@ const sampleConfig: ConfigFile = {
 
 let tmpRoot: string;
 let prevXdg: string | undefined;
-let prevSecretsRepo: string | undefined;
+let repoHandle: import("./helpers/test-repo").TestRepoHandle;
 
-beforeAll(() => {
+beforeAll(async () => {
   tmpRoot = mkdtempSync(join(tmpdir(), "vsync-rotate-pass-"));
   prevXdg = process.env.XDG_CONFIG_HOME;
   process.env.XDG_CONFIG_HOME = tmpRoot;
-  prevSecretsRepo = process.env.SECRETS_SYNC_REPO;
-  process.env.SECRETS_SYNC_REPO = TEST_REPO;
+  const { setupTestRepo } = await import("./helpers/test-repo");
+  repoHandle = setupTestRepo(TEST_REPO);
 });
 
 afterAll(async () => {
   if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
   else process.env.XDG_CONFIG_HOME = prevXdg;
-  if (prevSecretsRepo === undefined) delete process.env.SECRETS_SYNC_REPO;
-  else process.env.SECRETS_SYNC_REPO = prevSecretsRepo;
   for (const env of ["dev"]) await deleteKey(TEST_REPO, env);
+  repoHandle.restore();
   rmSync(tmpRoot, { recursive: true, force: true });
 });
 

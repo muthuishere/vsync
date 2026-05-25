@@ -53,10 +53,38 @@ export type StatusReport = {
   notices: string[];
   /** True when this platform supports listing keychain entries. False on Windows / locked-down Linux. */
   keychainEnumerationSupported: boolean;
+
+  // v0.16 — repo identity resolution metadata.
+  /** Which precedence step resolved the repo: "flag" (--repo), "file" (.vsync), or "auto" (parsed origin URL). */
+  source: "flag" | "file" | "auto";
+  /** Human-readable detail for the source (the flag value, the .vsync path, or the origin URL). */
+  sourceDetail: string;
+  /** Git toplevel. */
+  toplevel: string;
+  /** Current working directory at the time of the status invocation. */
+  cwd: string;
+  /** Origin URL from `git config --get remote.origin.url`, or null if unset. */
+  originUrl: string | null;
+  /** Worktree info: null when in the main worktree, populated for linked worktrees. */
+  worktree: { branch: string | null; mainToplevel: string } | null;
 };
 
 export type GatherOptions = {
   checkRemote?: boolean;
+  /**
+   * Pre-resolved repo identity metadata (from src/repo.ts::resolveRepoWithSource).
+   * Optional — unit tests that only exercise envs/profiles/keychain logic can
+   * omit it and get a synthetic "test" resolution. bin/status.ts always supplies
+   * the real resolution so the prefix block renders correctly.
+   */
+  resolution?: {
+    source: "flag" | "file" | "auto";
+    sourceDetail: string;
+    toplevel: string;
+    cwd: string;
+    originUrl: string | null;
+    worktree: { branch: string | null; mainToplevel: string } | null;
+  };
 };
 
 /**
@@ -90,6 +118,17 @@ export async function gatherStatus(
   repo: string,
   opts: GatherOptions = {},
 ): Promise<StatusReport> {
+  const resolution =
+    opts.resolution ??
+    ({
+      source: "auto",
+      sourceDetail: "(test default — no real resolution supplied)",
+      toplevel: process.cwd(),
+      cwd: process.cwd(),
+      originUrl: null,
+      worktree: null,
+    } as const);
+  opts = { ...opts, resolution };
   const envs = await listEnvFiles(repo);
   const profiles = await listProfiles();
   const profileNames = new Set(profiles.map((p) => p.name));
@@ -192,6 +231,18 @@ export async function gatherStatus(
     notices.push("--check-remote: remote drift detection is not wired in this build.");
   }
 
+  // v0.16: rename notice — when the resolved name differs from what the
+  // origin URL would auto-parse to, surface that fact informationally.
+  if (resolution.source !== "auto" && resolution.originUrl) {
+    const { parseRemoteUrl, normalize } = await import("./repo");
+    const autoName = normalize(parseRemoteUrl(resolution.originUrl));
+    if (autoName && autoName !== repo) {
+      notices.push(
+        `identity \`${repo}\` is a rename — origin would auto-resolve to \`${autoName}\`.`,
+      );
+    }
+  }
+
   return {
     repo,
     envs: envStatuses,
@@ -202,5 +253,11 @@ export async function gatherStatus(
     })),
     notices,
     keychainEnumerationSupported,
+    source: resolution.source,
+    sourceDetail: resolution.sourceDetail,
+    toplevel: resolution.toplevel,
+    cwd: resolution.cwd,
+    originUrl: resolution.originUrl,
+    worktree: resolution.worktree,
   };
 }

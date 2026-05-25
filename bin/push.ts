@@ -25,6 +25,13 @@ import {
   gatherRowMetadata,
   makeAuditClient,
 } from "../src/audit";
+import {
+  readLedger,
+  snapshotLedger,
+  writeLedger,
+  RemoteAheadError,
+} from "../src/ledger";
+import { walkVault } from "../src/vaultwalk";
 
 const HELP = `
 NAME
@@ -47,6 +54,8 @@ DESCRIPTION
   or the per-env audit opt-out is set. The inverse is \`vsync pull <env>\`.
 
 FLAGS
+  --force                  overwrite the remote even if a teammate pushed since
+                           your last sync. DANGEROUS — their work is lost.
   --no-audit               do not append an audit row for this push
   --note=<text>            free-form note recorded in the audit row's meta
   --meta key=value         extra audit-row meta KV (repeatable)
@@ -87,6 +96,7 @@ export async function main(argv: string[]): Promise<void> {
     process.exit(1);
   }
   const repo = await getRepoName({ override: flags.repo });
+  const wantForce = flags.force === "true";
 
   let cfg;
   try {
@@ -110,10 +120,33 @@ export async function main(argv: string[]): Promise<void> {
     process.exit(1);
   }
 
+  // v0.17 — pre-flight symlink check (push surface for SymlinkInVaultError).
+  walkVault(absVault);
+
   const ts = timestamp();
   const prefixKey = `${repo}/${env.toLowerCase()}/`;
   const versionKey = `${prefixKey}versions/${ts}.enc`;
   const pointerKey = `${prefixKey}latest`;
+
+  // v0.17 — lost-update guard. Read the ledger; HEAD the remote pointer;
+  // refuse if remote has advanced past our last sync (unless --force).
+  const ledger = readLedger(repo, env);
+  if (ledger && !wantForce) {
+    try {
+      const remoteTs = (await makeClient(cfg.s3).file(pointerKey).text()).trim();
+      if (remoteTs && remoteTs > ledger.last_sync_ts) {
+        throw new RemoteAheadError(env, ledger.last_sync_ts, remoteTs, ledger);
+      }
+    } catch (err: any) {
+      if (err instanceof RemoteAheadError) throw err;
+      // Pointer missing (404) → fresh prefix; nothing remote to be ahead of.
+      // Network error → don't fail the push for a guard; fall through.
+    }
+  } else if (!ledger) {
+    console.error(
+      `⚠ no ledger for ${env} — first push since v0.17 upgrade. Lost-update guard disabled until ledger exists.`,
+    );
+  }
 
   const tmpZip = join(
     tmpdir(),
@@ -142,6 +175,10 @@ export async function main(argv: string[]): Promise<void> {
   } finally {
     if (existsSync(tmpZip)) unlinkSync(tmpZip);
   }
+
+  // v0.17 — write the ledger from the just-pushed vault state.
+  const newLedger = snapshotLedger(absVault, ts, "push");
+  writeLedger(repo, env, newLedger);
 
   await tryAppendAudit(cfg.s3, cfgFile?.audit?.enabled, flags, lists, repo, env, ts);
 }

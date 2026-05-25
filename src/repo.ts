@@ -1,28 +1,36 @@
-// repo.ts — utilities for working out which repo we're running in.
+// repo.ts — resolve the canonical repo identity used by config paths and
+// the keychain.
 //
-// Two things consumers need:
-//   - getRepoRoot()   — the filesystem path of the repo top-level
-//   - getRepoName()   — a short identifier used as the namespace for the
-//                       config file and keychain entry
+// Precedence (first non-null wins). See docs/specs/v0.16-repo-identity-git-only.md.
 //
-// Repo-name precedence (first match wins):
-//   1. Explicit override (e.g. `--repo=foo` flag passed through)
-//   2. SECRETS_SYNC_REPO env var
-//   3. parsed `remote.origin.url` from git, normalized to <owner>_<repo>
-//      (e.g. "git@github.com:Acme/web.git" → "acme_web")
-//   4. basename of process.cwd() as a last resort
-//   5. literal "default" if everything fails sanitization
+//   Precondition: must be inside a git repository
+//                 (git rev-parse --show-toplevel succeeds).
+//                 Otherwise → NotInGitRepoError.
 //
-// All file paths and the keychain account are derived from the resulting
-// name, so it should be stable across machines for the same repo — and
-// across worktrees / fresh checkouts of the same repo (this is why step 3
-// uses the remote URL rather than the toplevel directory name).
+//   1. opts.override                   — explicit `--repo=<name>` flag.
+//                                        Throws VsyncFileClobberError if it
+//                                        differs from a present .vsync pin.
+//   2. readVsyncFile(toplevel)         — committed .vsync at git toplevel.
+//   3. parseRemoteUrl(origin)          — parsed `git config --get
+//                                        remote.origin.url`, normalised.
+//   4. ERROR (RepoIdentityUnresolvedError) — no remote set, no .vsync,
+//                                            no flag.
 //
-// See docs/specs/v0.9-repo-name-resolution.md for the full rationale.
+// `getRepoRoot()` is the git toplevel; callers that need to consult or
+// write the .vsync file pass it explicitly to readVsyncFile / writeVsyncFile.
+//
+// `vsync import` uses `getRepoNameForImport()` which substitutes the share
+// file's embedded repo in place of step 3 (the share is more authoritative
+// than the local origin for that one subcommand).
 
-import * as path from "node:path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { readVsyncFile, VsyncFileClobberError, vsyncFilePath } from "./vsyncfile";
 
-/** Filesystem path of the repo root (git toplevel, else cwd). */
+/**
+ * Filesystem path of the repo root (git toplevel).
+ * Throws NotInGitRepoError if we're not inside a git tree.
+ */
 export async function getRepoRoot(): Promise<string> {
   const proc = Bun.spawn(["git", "rev-parse", "--show-toplevel"], {
     stderr: "pipe",
@@ -30,9 +38,23 @@ export async function getRepoRoot(): Promise<string> {
   });
   const code = await proc.exited;
   if (code === 0) {
-    return (await new Response(proc.stdout).text()).trim();
+    const out = (await new Response(proc.stdout).text()).trim();
+    if (out) return out;
   }
-  return process.cwd();
+  throw new NotInGitRepoError(process.cwd());
+}
+
+/**
+ * Best-effort variant — returns null instead of throwing when not in a
+ * git tree. Used by `vsync status` so it can still render a useful
+ * "not in a git repo" message instead of erroring out.
+ */
+export async function tryGetRepoRoot(): Promise<string | null> {
+  try {
+    return await getRepoRoot();
+  } catch {
+    return null;
+  }
 }
 
 export type RepoNameOptions = {
@@ -44,26 +66,92 @@ export type RepoNameOptions = {
 
 /**
  * Resolve the canonical repo name used by config file paths and keychain
- * entries. See the precedence list at the top of this file.
+ * entries. See the precedence chain at the top of this file.
+ *
+ * @throws NotInGitRepoError if not inside a git repository
+ * @throws VsyncFileClobberError if a --repo override conflicts with a present .vsync
+ * @throws VsyncFileMalformedError if .vsync exists but is unparseable
+ * @throws RepoIdentityUnresolvedError if no source resolved to a name
  */
 export async function getRepoName(
   opts: RepoNameOptions = {},
 ): Promise<string> {
-  const fromOverride = normalize(opts.override);
-  if (fromOverride) return fromOverride;
-
-  const fromEnv = normalize(process.env.SECRETS_SYNC_REPO);
-  if (fromEnv) return fromEnv;
-
   const root = opts.root ?? (await getRepoRoot());
 
-  const fromRemote = normalize(parseRemoteUrl(await readRemoteUrl(root)));
+  // .vsync may exist regardless of which source wins — read it first so we
+  // can detect a flag-vs-file mismatch and throw the clobber error before
+  // we proceed.
+  const pinned = readVsyncFile(root); // null if absent; throws if malformed
+
+  const fromOverride = normalize(opts.override);
+  if (fromOverride) {
+    if (pinned && pinned.repo !== fromOverride) {
+      throw new VsyncFileClobberError(
+        `${root}/.vsync`,
+        pinned.repo,
+        fromOverride,
+      );
+    }
+    return fromOverride;
+  }
+
+  if (pinned) return pinned.repo;
+
+  const remoteUrl = await readRemoteUrl(root);
+  const fromRemote = normalize(parseRemoteUrl(remoteUrl));
   if (fromRemote) return fromRemote;
 
-  const fromCwd = normalize(path.basename(process.cwd()));
-  if (fromCwd) return fromCwd;
+  throw new RepoIdentityUnresolvedError(root, remoteUrl);
+}
 
-  return "default";
+/**
+ * Variant for `vsync import`: substitutes the share file's embedded repo
+ * for step 3 (origin URL parse). See spec §6.
+ *
+ * Precedence: --repo flag > .vsync > share's repo > ERROR
+ */
+export async function getRepoNameForImport(opts: {
+  override?: string;
+  root?: string;
+  shareRepo: string;
+}): Promise<string> {
+  const root = opts.root ?? (await getRepoRoot());
+  const pinned = readVsyncFile(root); // throws on malformed
+
+  const fromOverride = normalize(opts.override);
+  if (fromOverride) {
+    if (pinned && pinned.repo !== fromOverride) {
+      throw new VsyncFileClobberError(
+        `${root}/.vsync`,
+        pinned.repo,
+        fromOverride,
+      );
+    }
+    return fromOverride;
+  }
+
+  if (pinned) {
+    // Special: if .vsync pins one repo but the share is for a different one,
+    // refuse the import (likely wrong-share mistake — see spec §6.1 row 3).
+    const shareNorm = normalize(opts.shareRepo);
+    if (shareNorm && pinned.repo !== shareNorm) {
+      const { ShareRepoMismatchError } = await import("./vsyncfile");
+      // Note: caller knows the share path; we don't have it here. The bin/import
+      // layer catches this and re-throws with the path filled in.
+      throw new ShareRepoMismatchError(
+        `${root}/.vsync`,
+        "<share-file>",
+        pinned.repo,
+        shareNorm,
+      );
+    }
+    return pinned.repo;
+  }
+
+  const fromShare = normalize(opts.shareRepo);
+  if (fromShare) return fromShare;
+
+  throw new RepoIdentityUnresolvedError(root, null);
 }
 
 /**
@@ -120,7 +208,7 @@ function stripDotGit(s: string): string {
  * Read the URL of `origin` from the repo at `root`. Returns null on any
  * failure (no remote, command not on PATH, non-git directory).
  */
-async function readRemoteUrl(root: string): Promise<string | null> {
+export async function readRemoteUrl(root: string): Promise<string | null> {
   try {
     const proc = Bun.spawn(
       ["git", "-C", root, "config", "--get", "remote.origin.url"],
@@ -155,4 +243,167 @@ export function normalize(value: string | null | undefined): string | null {
     );
   }
   return stripped;
+}
+
+/**
+ * Detailed resolution: same precedence as getRepoName, but also reports which
+ * source won (flag / file / auto) and the underlying context (toplevel, cwd,
+ * origin URL, worktree info). Used by `vsync status` to display the source
+ * to the operator.
+ */
+export interface RepoResolution {
+  repo: string;
+  source: "flag" | "file" | "auto";
+  sourceDetail: string;
+  toplevel: string;
+  cwd: string;
+  originUrl: string | null;
+  worktree: { branch: string | null; mainToplevel: string } | null;
+}
+
+export async function resolveRepoWithSource(opts: {
+  override?: string;
+  root?: string;
+} = {}): Promise<RepoResolution> {
+  const cwd = process.cwd();
+  const toplevel = opts.root ?? (await getRepoRoot());
+  const originUrl = await readRemoteUrl(toplevel);
+  const worktree = await detectWorktree(toplevel);
+  const pinned = readVsyncFile(toplevel);
+  const fromOverride = normalize(opts.override);
+
+  if (fromOverride) {
+    if (pinned && pinned.repo !== fromOverride) {
+      throw new VsyncFileClobberError(
+        vsyncFilePath(toplevel),
+        pinned.repo,
+        fromOverride,
+      );
+    }
+    return {
+      repo: fromOverride,
+      source: "flag",
+      sourceDetail: `--repo=${fromOverride}`,
+      toplevel,
+      cwd,
+      originUrl,
+      worktree,
+    };
+  }
+
+  if (pinned) {
+    return {
+      repo: pinned.repo,
+      source: "file",
+      sourceDetail: vsyncFilePath(toplevel),
+      toplevel,
+      cwd,
+      originUrl,
+      worktree,
+    };
+  }
+
+  const fromRemote = normalize(parseRemoteUrl(originUrl));
+  if (fromRemote) {
+    return {
+      repo: fromRemote,
+      source: "auto",
+      sourceDetail: `parsed from origin: ${originUrl}`,
+      toplevel,
+      cwd,
+      originUrl,
+      worktree,
+    };
+  }
+
+  throw new RepoIdentityUnresolvedError(toplevel, originUrl);
+}
+
+/**
+ * Detect whether `toplevel` is a linked git worktree. Returns null for the
+ * main worktree (no special-casing needed). Returns { branch, mainToplevel }
+ * for linked worktrees.
+ */
+async function detectWorktree(
+  toplevel: string,
+): Promise<{ branch: string | null; mainToplevel: string } | null> {
+  try {
+    const proc = Bun.spawn(
+      ["git", "-C", toplevel, "rev-parse", "--git-common-dir"],
+      { stderr: "pipe", stdout: "pipe" },
+    );
+    const code = await proc.exited;
+    if (code !== 0) return null;
+    const commonDir = (await new Response(proc.stdout).text()).trim();
+    if (!commonDir) return null;
+    // Normalise to absolute path
+    const absCommon = commonDir.startsWith("/")
+      ? commonDir
+      : join(toplevel, commonDir);
+    // Main worktree's .git is `<toplevel>/.git`. Linked worktrees have a
+    // common-dir that points elsewhere (e.g. main repo's .git/worktrees/...).
+    const mainGit = join(toplevel, ".git");
+    if (absCommon === mainGit || absCommon === `${mainGit}/`) return null;
+    // We're in a linked worktree. The mainToplevel is the parent of the
+    // common-dir.
+    const mainToplevel = absCommon.replace(/\/\.git\/?$/, "");
+    if (!existsSync(mainToplevel)) return null;
+    // Read current branch
+    let branch: string | null = null;
+    try {
+      const branchProc = Bun.spawn(
+        ["git", "-C", toplevel, "rev-parse", "--abbrev-ref", "HEAD"],
+        { stderr: "pipe", stdout: "pipe" },
+      );
+      if ((await branchProc.exited) === 0) {
+        const out = (await new Response(branchProc.stdout).text()).trim();
+        if (out && out !== "HEAD") branch = out;
+      }
+    } catch {
+      // ignore
+    }
+    return { branch, mainToplevel };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Thrown by the resolver when `git rev-parse --show-toplevel` fails (we're
+ * not inside any git repository).
+ */
+export class NotInGitRepoError extends Error {
+  constructor(public readonly cwd: string) {
+    super(
+      `✗ vsync requires a git repository.\n\n` +
+        `  cwd: ${cwd}\n\n` +
+        `  Run \`git init\` and \`git remote add origin <url>\` to set up,\n` +
+        `  or \`cd\` into an existing git tree before running vsync.`,
+    );
+    this.name = "NotInGitRepoError";
+  }
+}
+
+/**
+ * Thrown when we're inside a git tree but no source (--repo flag, .vsync
+ * file, origin URL) resolved to a repo identity.
+ */
+export class RepoIdentityUnresolvedError extends Error {
+  constructor(
+    public readonly toplevel: string,
+    public readonly originUrl: string | null,
+  ) {
+    super(
+      `✗ Cannot resolve repo identity.\n\n` +
+        `  toplevel:      ${toplevel}\n` +
+        `  origin remote: ${originUrl ?? "not set"}\n` +
+        `  .vsync file:   not present\n` +
+        `  --repo flag:   not passed\n\n` +
+        `  Either:\n` +
+        `    - run \`git remote add origin <url>\` to derive identity from the remote, then re-run, OR\n` +
+        `    - run \`vsync init <env> --repo=<name>\` to pin the identity explicitly, OR\n` +
+        `    - pass \`--repo=<name>\` on this command for a one-shot rename.`,
+    );
+    this.name = "RepoIdentityUnresolvedError";
+  }
 }

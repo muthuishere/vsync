@@ -15,6 +15,7 @@ import { main } from "../bin/init";
 import { saveProfile, type Profile } from "../src/profiles";
 import { loadConfigFile } from "../src/repoconfig";
 import { getKey, deleteKey } from "../src/keychain";
+import { setupTestRepo, type TestRepoHandle } from "./helpers/test-repo";
 
 const TEST_REPO = "vsync_init_bin_test";
 
@@ -33,35 +34,25 @@ delete (noPrefixProfile as any).prefix;
 
 let tmpRoot: string;
 let prevXdg: string | undefined;
-let prevSecretsRepo: string | undefined;
-let prevCwd: string;
+let repoHandle: TestRepoHandle;
 
 beforeAll(() => {
   tmpRoot = mkdtempSync(join(tmpdir(), "vsync-init-bin-"));
   prevXdg = process.env.XDG_CONFIG_HOME;
   process.env.XDG_CONFIG_HOME = tmpRoot;
-  prevSecretsRepo = process.env.SECRETS_SYNC_REPO;
-  process.env.SECRETS_SYNC_REPO = TEST_REPO;
-  prevCwd = process.cwd();
-  // Run inside an isolated worktree so init's vault-folder creation and
-  // .gitignore checks don't touch the actual vsync repo we're testing in.
-  const workdir = mkdtempSync(join(tmpdir(), "vsync-init-cwd-"));
-  process.chdir(workdir);
+  // v0.16: tests run inside an ephemeral git repo with a .vsync pin
+  // so the resolver returns TEST_REPO without needing the now-removed
+  // SECRETS_SYNC_REPO env var.
+  repoHandle = setupTestRepo(TEST_REPO);
 });
 
 afterAll(async () => {
   if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
   else process.env.XDG_CONFIG_HOME = prevXdg;
-  if (prevSecretsRepo === undefined) delete process.env.SECRETS_SYNC_REPO;
-  else process.env.SECRETS_SYNC_REPO = prevSecretsRepo;
   for (const env of ["dev", "prod", "staging", "qa", "anothe"]) {
     await deleteKey(TEST_REPO, env);
   }
-  try {
-    process.chdir(prevCwd);
-  } catch {
-    // tolerate cleanup race
-  }
+  repoHandle.restore();
   rmSync(tmpRoot, { recursive: true, force: true });
 });
 

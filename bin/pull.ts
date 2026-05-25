@@ -6,7 +6,7 @@
 // verifies the embedded manifest timestamp matches the `latest` pointer,
 // decrypts, and unpacks into the resolved vault folder.
 
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, rmSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "../src/argv";
@@ -25,6 +25,14 @@ import {
   gatherRowMetadata,
   makeAuditClient,
 } from "../src/audit";
+import {
+  checkDirty,
+  readLedger,
+  snapshotLedger,
+  writeLedger,
+  LocalDirtyError,
+} from "../src/ledger";
+import { backupVault } from "../src/vaultbackup";
 
 const HELP = `
 NAME
@@ -47,6 +55,12 @@ DESCRIPTION
   opt-out is set.
 
 FLAGS
+  --backup                 snapshot the current vault to
+                           \$XDG_CONFIG_HOME/vsync/backups/<repo>/<env>.backup-<ts>/
+                           before pulling. Use when local has unsynced edits
+                           you may want to recover.
+  --force                  discard any local edits without backing up.
+                           Mutually exclusive with --backup.
   --no-audit               do not append an audit row for this pull
   --note=<text>            free-form note recorded in the audit row's meta
   --meta key=value         extra audit-row meta KV (repeatable)
@@ -87,6 +101,13 @@ export async function main(argv: string[]): Promise<void> {
   }
   const repo = await getRepoName({ override: flags.repo });
 
+  const wantForce = flags.force === "true";
+  const wantBackup = flags.backup === "true";
+  if (wantForce && wantBackup) {
+    console.error("error: --force and --backup are mutually exclusive.");
+    process.exit(1);
+  }
+
   let cfg;
   try {
     cfg = await loadEnvConfig(repo, env);
@@ -99,10 +120,37 @@ export async function main(argv: string[]): Promise<void> {
   const cfgFile = await loadConfigFile(repo, env);
   const root = await getRepoRoot();
   const vaultFolder = resolveVaultFolder(cfg, env);
+  const absVault = join(root, vaultFolder);
+
+  // v0.17 — refuse-on-dirty unless --backup or --force was passed.
+  const ledger = readLedger(repo, env);
+  const diff = checkDirty(absVault, ledger);
+  if (diff.kind === "dirty") {
+    if (!wantForce && !wantBackup) {
+      throw new LocalDirtyError(env, absVault, ledger!, diff);
+    }
+  } else if (diff.kind === "untracked" && ledger === null && existsSync(absVault)) {
+    console.error(
+      `⚠ no ledger for ${env} — first sync since v0.17 upgrade. This pull may overwrite local edits.`,
+    );
+    console.error(
+      `  After this pull, vsync will track changes to prevent silent overwrites.`,
+    );
+  }
 
   const prefixKey = `${repo}/${env.toLowerCase()}/`;
   const pointerKey = `${prefixKey}latest`;
   const client = makeClient(cfg.s3);
+
+  // v0.17 — --backup: snapshot current vault under XDG before pulling fresh.
+  let plainBackupPath: string | null = null;
+  if (wantBackup && existsSync(absVault)) {
+    plainBackupPath = backupVault(repo, env, absVault);
+    console.log(`[backup] vault snapshotted → ${plainBackupPath}`);
+    rmSync(absVault, { recursive: true, force: true });
+  } else if (wantForce && existsSync(absVault)) {
+    rmSync(absVault, { recursive: true, force: true });
+  }
 
   console.log(`[1/6] backing up local ${vaultFolder}/ (if any)`);
   const backup = await makeBackup(env, root, [vaultFolder], cfg.encryption);
@@ -158,6 +206,15 @@ export async function main(argv: string[]): Promise<void> {
     console.log(`✅ pulled ${repo}/${env} version ${remoteTs}`);
   } finally {
     if (existsSync(tmpZip)) unlinkSync(tmpZip);
+  }
+
+  // v0.17 — write the ledger from the freshly-pulled vault state.
+  if (existsSync(absVault)) {
+    const newLedger = snapshotLedger(absVault, remoteTs, "pull");
+    writeLedger(repo, env, newLedger);
+  }
+  if (plainBackupPath) {
+    console.log(`   prior state preserved at ${plainBackupPath}`);
   }
 
   await tryAppendAudit(cfg.s3, cfgFile?.audit?.enabled, flags, lists, repo, env, remoteTs);
