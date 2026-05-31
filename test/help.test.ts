@@ -209,3 +209,43 @@ describe("vsync --version", () => {
     }
   });
 });
+
+// ─── profile / profiles dispatch ───────────────────────────────────────
+
+describe("vsync profile(s) dispatch", () => {
+  const repoRoot = new URL("..", import.meta.url).pathname;
+
+  async function run(args: string[]): Promise<{ out: string; err: string; exit: number }> {
+    const proc = Bun.spawn({
+      cmd: ["bun", `${repoRoot}bin/vsync.ts`, ...args],
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const exit = await proc.exited;
+    const out = await new Response(proc.stdout).text();
+    const err = await new Response(proc.stderr).text();
+    return { out, err, exit };
+  }
+
+  // The `profiles` plural is a natural thing to type — it must not be rejected.
+  for (const args of [["profiles"], ["profiles", "list"], ["profile"], ["profile", "list"]]) {
+    test(`\`vsync ${args.join(" ")}\` is accepted (defaults to list)`, async () => {
+      const { err, exit } = await run(args);
+      expect(exit).toBe(0);
+      expect(err).not.toContain("unknown subcommand");
+      expect(err).not.toContain("unknown profile subcommand");
+    });
+  }
+
+  test("a genuinely unknown verb is still rejected", async () => {
+    const { err, exit } = await run(["bogus"]);
+    expect(exit).toBe(1);
+    expect(err).toContain("unknown subcommand: bogus");
+  });
+
+  test("`profiles --help` routes to the profile help", async () => {
+    const { out, exit } = await run(["profiles", "--help"]);
+    expect(exit).toBe(0);
+    expect(out).toContain("vsync profile");
+  });
+});

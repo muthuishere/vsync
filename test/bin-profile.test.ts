@@ -337,18 +337,20 @@ describe("main — non-TTY behaviour", () => {
     expect(errBuf.join("\n").toLowerCase()).toContain("usage");
   });
 
-  test("no subcommand prints usage and exits 1", async () => {
+  test("no subcommand defaults to `list` (does not error)", async () => {
+    // Bare `vsync profile` / `vsync profiles` is the common "show me my
+    // profiles" intent — it lists rather than printing usage + exit 1.
     (process.stdin as any).isTTY = false;
     let threw = false;
     try {
       await main([]);
     } catch (e: any) {
       threw = true;
-      expect(String(e.message)).toBe("__exit:1");
     } finally {
       restore();
     }
-    expect(threw).toBe(true);
-    expect(errBuf.join("\n").toLowerCase()).toContain("usage");
+    expect(threw).toBe(false);
+    // Same output as an explicit `list` with no profiles configured.
+    expect(logBuf.join("\n")).toContain("no profiles");
   });
 });

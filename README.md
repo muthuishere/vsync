@@ -91,7 +91,7 @@ One edit in the vault; every place that needs the secret stays in step. [Sync ta
 ## What's in the box
 
 - **CLI** at `bin/vsync.ts` (Bun-native, ships as `@muthuishere/vsync` on npm)
-- **Runtime libraries** at `libraries/{python,typescript,go,java}/` — at `v0.11.0` (catch up to CLI's `0.13.0` in next release), all behaviorally identical
+- **Runtime libraries** at `libraries/{python,typescript,go,java}/` — at `v0.11.0` (catch up to CLI's `0.14.0` in next release), all behaviorally identical
 - **Conformance corpus** at `docs/specs/test-vectors/` — every library passes the same 31 vectors
 - **Specs** at `docs/specs/` — versioned design notes (v0.2 envelope, v0.4 audit log, v0.10 CLI verbs, v0.11 test vectors, v0.12 runtime lib API, v0.13 profile system, v0.16 git-only identity + `.vsync` pin, v0.17 pull-safety ledger)
 - **Site** at `docs/` — VitePress, auto-deployed to <https://muthuishere.github.io/vsync/>
@@ -108,8 +108,9 @@ One edit in the vault; every place that needs the secret stays in step. [Sync ta
 
 ## Versioning
 
-Current CLI release: **`0.13.0`**. Runtime libraries are at `0.11.0` and will catch up to `0.13.0` when the v0.15 lib redesign lands.
+Current CLI release: **`0.14.0`**. Runtime libraries are at `0.11.0` and will catch up to `0.14.0` when the v0.15 lib redesign lands.
 
+- `0.14.0` `vsync profiles` (plural) now works as an alias for `vsync profile`, and bare `vsync profile` / `vsync profiles` defaults to `list` (the common "show me my profiles" intent).
 - `0.13.0` `vsync docs` is now a CLI capability guide ("what vsync does + how"), not a committable repo file. New offline runbooks: `vsync docs aws | gcp | custom` (create the S3 bucket → profile → init/push/pull/use/sync) and `vsync docs agent` (intent→command map for AI assistants); `vsync docs list` indexes them. New `vsync --version` / `-v`. Onboarding handbook added to the docs site. Packaging fix: dropped a stale `skills` entry from the npm `files` list so `bun install -g` no longer warns.
 - `0.12.0` **Breaking.** Git is now a precondition — every subcommand errors outside a git tree. `SECRETS_SYNC_REPO` is gone (use `--repo=<name>`). New committed `.vsync` identity pin file ([v0.16](docs/specs/v0.16-repo-identity-git-only.md)). `vsync pull` refuses on unsynced local edits; `vsync push` refuses when remote has advanced — `--backup` / `--force` escape hatches ([v0.17](docs/specs/v0.17-pull-safety.md)). New typed errors render without stack traces. `vsync status` adds a prefix block showing identity source.
 - `0.11.0` Profile system replaces single defaults. New `vsync runtime-token`, `vsync rotate-passphrase`, `vsync status` subcommands. Four runtime libraries: Python (reference impl), TypeScript, Go, Java. Detailed `--help` on every subcommand. [Upgrade notes →](https://muthuishere.github.io/vsync/guide/upgrade-to-0.11)

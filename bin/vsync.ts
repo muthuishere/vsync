@@ -109,7 +109,11 @@ if (subcommand === "--version" || subcommand === "-v" || subcommand === "version
 
 if (!subcommand || subcommand === "--help" || subcommand === "-h") usage(0);
 
-if (!SUBCOMMANDS.includes(subcommand as Subcommand)) {
+// Friendly aliases for natural plurals / synonyms — map to the canonical verb.
+const ALIASES: Record<string, Subcommand> = { profiles: "profile" };
+const canonical: string = ALIASES[subcommand] ?? subcommand;
+
+if (!SUBCOMMANDS.includes(canonical as Subcommand)) {
   console.error(`unknown subcommand: ${subcommand}`);
   usage(1);
 }
@@ -131,7 +135,7 @@ const CLEAN_ERROR_NAMES = new Set([
 ]);
 
 async function dispatch(): Promise<void> {
-  switch (subcommand as Subcommand) {
+  switch (canonical as Subcommand) {
   case "init": {
     const { main } = await import("./init");
     await main(subArgv);

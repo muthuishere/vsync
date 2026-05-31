@@ -360,12 +360,9 @@ SEE ALSO
 export async function main(argv: string[]): Promise<void> {
   if (wantsHelp(argv)) printHelp(HELP);
   const { positional, flags } = parseArgs(argv);
-  const verb = positional[0];
-
-  if (!verb) {
-    usage(true);
-    process.exit(1);
-  }
+  // Bare `vsync profile` (or the `profiles` alias) defaults to `list` — the
+  // most common intent and what `vsync profiles` reads as.
+  const verb = positional[0] ?? "list";
 
   const revealSecret = flags["reveal-secret"] === "true";
   const yes = flags.yes === "true";

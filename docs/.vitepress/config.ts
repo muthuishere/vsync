@@ -32,7 +32,7 @@ export default defineConfig({
       { text: "Examples", link: "/examples/" },
       { text: "Architecture", link: "/architecture/mental-model" },
       {
-        text: "0.13.0",
+        text: "0.14.0",
         items: [
           { text: "Changelog", link: "/guide/versioning" },
           { text: "Upgrade to 0.11", link: "/guide/upgrade-to-0.11" },
