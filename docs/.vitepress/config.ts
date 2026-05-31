@@ -27,11 +27,12 @@ export default defineConfig({
 
     nav: [
       { text: "Guide", link: "/guide/quickstart" },
+      { text: "Handbook", link: "/handbook/" },
       { text: "Libraries", link: "/libraries/" },
       { text: "Examples", link: "/examples/" },
       { text: "Architecture", link: "/architecture/mental-model" },
       {
-        text: "0.11.0",
+        text: "0.13.0",
         items: [
           { text: "Changelog", link: "/guide/versioning" },
           { text: "Upgrade to 0.11", link: "/guide/upgrade-to-0.11" },
@@ -89,6 +90,18 @@ export default defineConfig({
             { text: "FAQ", link: "/guide/faq" },
             { text: "Upgrade to 0.11", link: "/guide/upgrade-to-0.11" },
             { text: "Versioning", link: "/guide/versioning" },
+          ],
+        },
+      ],
+
+      "/handbook/": [
+        {
+          text: "Onboarding handbook",
+          items: [
+            { text: "Overview", link: "/handbook/" },
+            { text: "Bucket on AWS S3", link: "/handbook/awss3" },
+            { text: "Bucket on GCP (GCS)", link: "/handbook/gcps3" },
+            { text: "Bucket on your own S3 / VPS", link: "/handbook/customs3" },
           ],
         },
       ],

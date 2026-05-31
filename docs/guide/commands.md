@@ -129,9 +129,21 @@ Print the S3-side audit log: who/where/when of every push/pull/import/export. Se
 
 ## docs
 
-### `docs`
+### `docs [<topic>]`
 
-Print a short onboarding reference (commands, vault layout, recovery procedure) to stdout. Pipe wherever you want — `vsync docs > infra/AGENTS.md` to give teammates and AI agents a vsync cheat-sheet inside the repo.
+`vsync docs` (no argument) prints a **CLI capability guide** — what every verb does, plus pointers to the runbooks below and `vsync <sub> --help`. It documents the CLI; it is not a file to commit.
+
+With a topic, it prints a complete, copy-paste, offline runbook:
+
+```bash
+vsync docs aws        # create an AWS S3 bucket + IAM key, then init/push/pull/sync
+vsync docs gcp        # GCS bucket + HMAC interop key
+vsync docs custom     # self-hosted MinIO / any S3-compatible (VPS, R2, B2, Wasabi…)
+vsync docs agent      # workflow map an AI assistant follows to drive vsync
+vsync docs list       # list available topics
+```
+
+The same provider runbooks live on the site under the [handbook](/handbook/).
 
 ---
 

@@ -1,44 +1,62 @@
 import { test, expect, describe } from "bun:test";
-import { DOCS_MD } from "../src/templates/docs.md";
+import { DOCS_OVERVIEW } from "../src/templates/docs.md";
 
-describe("vsync docs content", () => {
-  test("output is at least 1 KB", () => {
-    expect(DOCS_MD.length).toBeGreaterThanOrEqual(1024);
+describe("vsync docs — CLI capability guide", () => {
+  test("output is at least 512 bytes", () => {
+    expect(DOCS_OVERVIEW.length).toBeGreaterThanOrEqual(512);
   });
 
   test("starts with a top-level markdown heading", () => {
-    expect(DOCS_MD.split("\n")[0]).toMatch(/^#\s+/);
+    expect(DOCS_OVERVIEW.split("\n")[0]).toMatch(/^#\s+/);
   });
 
+  // Documents what every verb does (bare verb form — this is the CLI's own
+  // command map, not a "vsync <verb>" walkthrough).
   for (const verb of [
+    "profile add",
+    "profile list",
+    "profile show",
+    "profile remove",
     "init",
-    "export",
-    "import",
     "push",
     "pull",
+    "use",
     "versions",
+    "audit",
+    "export",
+    "import",
     "sync",
-    "docs",
+    "runtime-token",
+    "rotate-passphrase",
+    "status",
   ]) {
-    test(`mentions the ${verb} command`, () => {
-      expect(DOCS_MD).toContain(`vsync ${verb}`);
+    test(`documents the ${verb} command`, () => {
+      expect(DOCS_OVERVIEW).toContain(verb);
     });
   }
 
-  test("references the vault folder convention", () => {
-    expect(DOCS_MD).toContain("infra/vault/");
+  test("points at the provider runbooks", () => {
+    expect(DOCS_OVERVIEW).toContain("vsync docs aws");
   });
 
-  test("references the keychain service name", () => {
-    expect(DOCS_MD).toContain("tools.vsync");
+  test("points at the agent map", () => {
+    expect(DOCS_OVERVIEW).toContain("vsync docs agent");
   });
 
-  test("documents the backup recovery procedure (mentions RQE1 + PBKDF2)", () => {
-    expect(DOCS_MD).toContain("RQE1");
-    expect(DOCS_MD).toContain("PBKDF2");
+  test("points at per-subcommand help", () => {
+    expect(DOCS_OVERVIEW).toContain("vsync <sub> --help");
   });
 
-  test("includes agent rules", () => {
-    expect(DOCS_MD).toMatch(/Rules for AI agents/i);
+  test("names the keychain service", () => {
+    expect(DOCS_OVERVIEW).toContain("tools.vsync");
+  });
+
+  test("documents the two-halves invariant", () => {
+    expect(DOCS_OVERVIEW).toMatch(/both halves/i);
+  });
+
+  // It documents the CLI; it is NOT a repo artifact to commit.
+  test("does not frame itself as a committable AGENTS.md", () => {
+    expect(DOCS_OVERVIEW).not.toContain("AGENTS.md");
   });
 });

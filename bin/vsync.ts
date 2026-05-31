@@ -77,7 +77,7 @@ function usage(code = 0): never {
   out("info / visibility");
   out("  status                          summarise local configs, profiles, and orphans (offline)");
   out("  audit <env> [--limit=N|--all|--csv]   show the append-only S3 audit log for this (repo, env)");
-  out("  docs                            print the onboarding reference to stdout");
+  out("  docs [<topic>]                  what vsync does + how; or a setup/agent runbook (aws|gcp|custom|agent)");
   out("");
   out("Conventions");
   out("  Every subcommand accepts:");
@@ -88,11 +88,24 @@ function usage(code = 0): never {
   out("    --interactive                 force interactive prompts (where supported)");
   out("");
   out("Run `vsync <subcommand> --help` for detailed flags, examples, and exit codes.");
+  out("Run `vsync --version` to print the installed CLI version.");
+  out("");
+  out("Provider setup runbooks: `vsync docs aws | gcp | custom`");
+  out("AI agents / assistants:  `vsync docs agent` (workflow map: intent → command)");
   process.exit(code);
 }
 
 const subcommand = process.argv[2];
 const subArgv = process.argv.slice(3);
+
+if (subcommand === "--version" || subcommand === "-v" || subcommand === "version") {
+  // Read the shipped package.json so the printed version can never drift from
+  // the published package. Bun resolves JSON imports natively.
+  const pkg = (await import("../package.json", { with: { type: "json" } }))
+    .default as { version?: string };
+  console.log(pkg.version ?? "unknown");
+  process.exit(0);
+}
 
 if (!subcommand || subcommand === "--help" || subcommand === "-h") usage(0);
 

@@ -182,3 +182,30 @@ describe("vsync --help (top-level)", () => {
     expect(stdout).toMatch(/<subcommand>\s*--help|subcommand.*--help/i);
   });
 });
+
+// ─── version flag ──────────────────────────────────────────────────────
+
+describe("vsync --version", () => {
+  const repoRoot = new URL("..", import.meta.url).pathname;
+
+  async function runVersion(flag: string): Promise<{ out: string; exit: number }> {
+    const proc = Bun.spawn({
+      cmd: ["bun", `${repoRoot}bin/vsync.ts`, flag],
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const exit = await proc.exited;
+    const out = (await new Response(proc.stdout).text()).trim();
+    return { out, exit };
+  }
+
+  test("prints the package.json version and exits 0", async () => {
+    const pkg = (await import("../package.json")).default as { version: string };
+    for (const flag of ["--version", "-v", "version"]) {
+      const { out, exit } = await runVersion(flag);
+      expect(exit).toBe(0);
+      expect(out).toBe(pkg.version);
+      expect(out).toMatch(/^\d+\.\d+\.\d+/);
+    }
+  });
+});
