@@ -87,9 +87,20 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0 dbus-x11
 
       - name: Test
+        env:
+          # gcr-prompter tries to open a GUI prompt and dies; without a display
+          # the daemon must never reach for one.
+          GNOME_KEYRING_CONTROL: ""
         run: |
           dbus-run-session -- bash -c '
-            echo -n "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1
+            set -e
+            mkdir -p "$HOME/.local/share/keyrings"
+            # --login CREATES and unlocks the "login" collection from an empty
+            # password on stdin; --unlock alone only unlocks an existing one,
+            # which is why the secrets API 404d on
+            # /org/freedesktop/secrets/collection/login.
+            echo -n "" | gnome-keyring-daemon --daemonize --login
+            echo -n "" | gnome-keyring-daemon --start --components=secrets
             sleep 1
             bun test
           '
