@@ -45,7 +45,14 @@ jobs:
   # Everything must be green before the single publish job runs.
   # ─────────────────────────────────────────────────────────────────────────
   verify:
-    runs-on: ubuntu-latest
+    # macOS, not ubuntu: `Bun.secrets` needs a real OS keychain and ~51 tests
+    # exercise it. On Linux that means gnome-keyring over D-Bus, whose login
+    # collection can only be created through gcr-prompter — a GUI prompt that
+    # cannot work headless ("cannot open display", then
+    # /org/freedesktop/secrets/collection/login 404s). macOS runners have a
+    # working Keychain, so the suite runs for real instead of being skipped.
+    # CLAUDE.md already documents macOS as the supported test platform.
+    runs-on: macos-latest
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
@@ -76,34 +83,7 @@ jobs:
         run: task check:version
 
       - run: bun install --frozen-lockfile
-
-      # `Bun.secrets` talks to the OS keychain, which on Linux means libsecret
-      # over D-Bus. A bare ubuntu runner has neither, so ~53 tests across
-      # init / status / envconfig / rotate-passphrase fail with no keyring.
-      # Install gnome-keyring and run the suite inside a D-Bus session with an
-      # unlocked (empty-password) collection, so the real keychain path is
-      # exercised rather than skipped.
-      - name: Keyring for Bun.secrets
-        run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0 dbus-x11
-
-      - name: Test
-        env:
-          # gcr-prompter tries to open a GUI prompt and dies; without a display
-          # the daemon must never reach for one.
-          GNOME_KEYRING_CONTROL: ""
-        run: |
-          dbus-run-session -- bash -c '
-            set -e
-            mkdir -p "$HOME/.local/share/keyrings"
-            # --login CREATES and unlocks the "login" collection from an empty
-            # password on stdin; --unlock alone only unlocks an existing one,
-            # which is why the secrets API 404d on
-            # /org/freedesktop/secrets/collection/login.
-            echo -n "" | gnome-keyring-daemon --daemonize --login
-            echo -n "" | gnome-keyring-daemon --start --components=secrets
-            sleep 1
-            bun test
-          '
+      - run: bun test
 
   # ─────────────────────────────────────────────────────────────────────────
   # Libraries: proven, not published. Keeps a release honest without
