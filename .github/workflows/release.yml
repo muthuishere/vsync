@@ -76,7 +76,23 @@ jobs:
         run: task check:version
 
       - run: bun install --frozen-lockfile
-      - run: bun test
+
+      # `Bun.secrets` talks to the OS keychain, which on Linux means libsecret
+      # over D-Bus. A bare ubuntu runner has neither, so ~53 tests across
+      # init / status / envconfig / rotate-passphrase fail with no keyring.
+      # Install gnome-keyring and run the suite inside a D-Bus session with an
+      # unlocked (empty-password) collection, so the real keychain path is
+      # exercised rather than skipped.
+      - name: Keyring for Bun.secrets
+        run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0 dbus-x11
+
+      - name: Test
+        run: |
+          dbus-run-session -- bash -c '
+            echo -n "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1
+            sleep 1
+            bun test
+          '
 
   # ─────────────────────────────────────────────────────────────────────────
   # Libraries: proven, not published. Keeps a release honest without
