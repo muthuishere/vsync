@@ -1,35 +1,35 @@
 name: Release
 
-# Publishes the unified release on a `v*` tag.
+# Publishes on a `v*` tag.
 #
-# AUTH MODEL — OIDC trusted publishing, no long-lived tokens where possible:
+# SCOPE — only the CLI is published. As of 0.15.0 the CLI is the sole artifact
+# that has ever shipped:
 #
-#   npm (CLI + TS lib)  OIDC trusted publishing. Requires a Trusted Publisher
-#                       configured per package on npmjs.com pointing at this
-#                       repo + workflow filename, and npm CLI >= 11.5.1.
-#                       No NPM_TOKEN secret.
-#   PyPI (Python lib)   OIDC trusted publishing via pypa/gh-action-pypi-publish.
-#                       Requires a Trusted Publisher on pypi.org for the
-#                       project. No PYPI_TOKEN secret.
-#   Maven Central       NOT OIDC. Sonatype's Central Portal has no GitHub OIDC
-#                       trusted-publisher flow, so this job still needs a user
-#                       token + a GPG signing key as secrets, and is gated on
-#                       those secrets being present.
-#   Go                  Nothing to publish — the module is resolved straight
-#                       from the `libraries/go/v*` tag. Pushing the tag IS the
-#                       release.
+#   @muthuishere/vsync              npm      PUBLISHED  <- this workflow
+#   @muthuishere/vsync-s3-client    npm      never published
+#   vsync-s3-client                 PyPI     never published
+#   io.github.muthuishere:...       Maven    never published
+#   libraries/go                    (none)   resolved from the git tag
 #
-# `id-token: write` is what mints the OIDC token; without it both trusted-
-# publish paths fall back to failing rather than silently using a token.
+# The libraries are still built and tested here so a release can't ship a CLI
+# that sits alongside broken library code — but nothing uploads them. When one
+# is ready to publish for real, see RELEASING.md; the short version is that
+# npm and Maven need the package to EXIST before a trusted publisher can be
+# attached, so each library needs one manual first publish before CI can take
+# over via OIDC.
+#
+# AUTH — npm OIDC trusted publishing. No NPM_TOKEN in this repo. Requires a
+# Trusted Publisher on npmjs.com for @muthuishere/vsync pointing at this repo
+# + `release.yml`, and npm CLI >= 11.5.1. `id-token: write` mints the token.
 
 on:
   push:
     tags:
-      - "v*"          # deliberately NOT libraries/go/v* — that tag is the Go release
+      - "v*"          # deliberately NOT libraries/go/v* — that tag IS the Go release
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Build and verify everything, publish nothing"
+        description: "Run every check and publish nothing"
         type: boolean
         default: true
 
@@ -42,9 +42,7 @@ concurrency:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────
-  # Gate: the unified-version check and the full test suite must pass before
-  # anything is published. A partial release across four registries is very
-  # unpleasant to unwind, so everything is verified up front.
+  # Everything must be green before the single publish job runs.
   # ─────────────────────────────────────────────────────────────────────────
   verify:
     runs-on: ubuntu-latest
@@ -52,7 +50,6 @@ jobs:
       version: ${{ steps.v.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -71,21 +68,75 @@ jobs:
             exit 1
           fi
 
-      - name: Unified version across all packages
-        uses: arduino/setup-task@v2
+      - uses: arduino/setup-task@v2
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - run: task check:version
+
+      - name: Unified version across all packages
+        run: task check:version
 
       - run: bun install --frozen-lockfile
       - run: bun test
 
   # ─────────────────────────────────────────────────────────────────────────
-  # npm — the CLI. OIDC trusted publishing; note `npm publish`, not
-  # `bun publish`, because the OIDC handshake lives in the npm CLI.
+  # Libraries: proven, not published. Keeps a release honest without
+  # pretending these ship. `continue-on-error` is deliberately NOT set — if a
+  # library is broken, the release should stop and be looked at.
+  # ─────────────────────────────────────────────────────────────────────────
+  verify-libraries:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - name: Go
+        working-directory: libraries/go
+        run: go test ./...
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: TypeScript
+        working-directory: libraries/typescript
+        run: |
+          npm ci || npm install
+          npm test
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python
+        working-directory: libraries/python
+        run: |
+          pip install -e . pytest
+          pytest -q
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Java
+        working-directory: libraries/java
+        run: mvn --batch-mode test
+
+      - name: Companion Go tag
+        run: |
+          V="${{ needs.verify.outputs.version }}"
+          if git rev-parse "libraries/go/v$V" >/dev/null 2>&1; then
+            echo "✓ libraries/go/v$V present — Go consumers can resolve v$V"
+          else
+            echo "::warning::libraries/go/v$V missing — push it so Go can resolve v$V (task tag:release creates both tags)"
+          fi
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # The only thing that actually ships. npm OIDC — note `npm publish`, not
+  # `bun publish`: the OIDC handshake lives in the npm client.
   # ─────────────────────────────────────────────────────────────────────────
   publish-cli:
-    needs: verify
+    needs: [verify, verify-libraries]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -107,137 +158,3 @@ jobs:
       - name: Dry run
         if: ${{ inputs.dry_run }}
         run: npm publish --access public --dry-run
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # npm — the TypeScript runtime library.
-  # ─────────────────────────────────────────────────────────────────────────
-  publish-ts:
-    needs: verify
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    defaults:
-      run:
-        working-directory: libraries/typescript
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          registry-url: "https://registry.npmjs.org"
-
-      - run: npm install -g npm@latest
-      - run: npm ci || npm install
-      - run: npm test
-      - run: npm run build --if-present
-
-      - name: Publish @muthuishere/vsync-s3-client
-        if: ${{ !inputs.dry_run }}
-        run: npm publish --access public
-
-      - name: Dry run
-        if: ${{ inputs.dry_run }}
-        run: npm publish --access public --dry-run
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # PyPI — OIDC trusted publishing. The action reads the OIDC token itself;
-  # there is no password/token input on purpose.
-  # ─────────────────────────────────────────────────────────────────────────
-  publish-python:
-    needs: verify
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - run: pip install --upgrade build pytest
-        working-directory: libraries/python
-
-      - name: Test
-        working-directory: libraries/python
-        run: |
-          pip install -e .
-          pytest -q
-
-      - name: Build sdist + wheel
-        working-directory: libraries/python
-        run: python -m build
-
-      - name: Publish to PyPI
-        if: ${{ !inputs.dry_run }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: libraries/python/dist
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # Go — nothing to upload. The proxy resolves the module from the tag, so
-  # this job just proves the tag exists and the package builds.
-  # ─────────────────────────────────────────────────────────────────────────
-  verify-go:
-    needs: verify
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.23"
-
-      - run: go test ./...
-        working-directory: libraries/go
-
-      - name: Companion Go tag must exist
-        run: |
-          V="${{ needs.verify.outputs.version }}"
-          if git rev-parse "libraries/go/v$V" >/dev/null 2>&1; then
-            echo "✓ libraries/go/v$V present — the Go module release is live"
-          else
-            echo "::warning::libraries/go/v$V is missing. Go consumers cannot resolve v$V until you push it (task tag:release creates both tags)."
-          fi
-
-  # ─────────────────────────────────────────────────────────────────────────
-  # Maven Central — the one registry with no OIDC path. Skipped entirely
-  # unless the signing secrets are configured, so the rest of the release
-  # is never blocked by it.
-  # ─────────────────────────────────────────────────────────────────────────
-  publish-java:
-    needs: verify
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Are Central credentials configured?
-        id: gate
-        env:
-          USER_TOKEN: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
-        run: |
-          if [ -n "$USER_TOKEN" ]; then echo "ready=true" >> "$GITHUB_OUTPUT";
-          else echo "ready=false" >> "$GITHUB_OUTPUT";
-               echo "::notice::Skipping Maven Central — CENTRAL_TOKEN_USERNAME not set. Publish manually with 'task java:publish'."; fi
-
-      - uses: actions/setup-java@v4
-        if: steps.gate.outputs.ready == 'true'
-        with:
-          distribution: temurin
-          java-version: "21"
-          server-id: central
-          server-username: MAVEN_USERNAME
-          server-password: MAVEN_PASSWORD
-          gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
-          gpg-passphrase: MAVEN_GPG_PASSPHRASE
-
-      - name: Publish to Maven Central
-        if: ${{ steps.gate.outputs.ready == 'true' && !inputs.dry_run }}
-        working-directory: libraries/java
-        env:
-          MAVEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
-          MAVEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
-          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
-        run: mvn --batch-mode -P release deploy

@@ -1,107 +1,99 @@
 # Releasing
 
-All five artifacts ship under **one unified version**, enforced by
-`task check:version`. Publishing runs in GitHub Actions on a `v*` tag, using
-**OIDC trusted publishing** — no long-lived registry tokens in this repo.
+## What actually ships
 
-## One-time setup
+Only the CLI. As of 0.15.0 it is the sole artifact that has ever been
+published:
 
-Do these once per package. Until they exist, the publish jobs will fail with
-an auth error — that's the intended failure mode, not a fallback to tokens.
+| Artifact | Registry | Status |
+|---|---|---|
+| `@muthuishere/vsync` | npm | **published** — released by CI |
+| `@muthuishere/vsync-s3-client` | npm | never published |
+| `vsync-s3-client` | PyPI | never published |
+| `io.github.muthuishere:vsync-s3-client` | Maven Central | never published |
+| `libraries/go` | — | no registry; the git tag *is* the release |
 
-### npm — `@muthuishere/vsync` and `@muthuishere/vsync-s3-client`
+The libraries are versioned in lockstep and **built and tested** on every
+release, so a CLI can't ship next to broken library code. They are not
+uploaded anywhere.
 
-For **each** package on npmjs.com → *Settings* → *Trusted Publisher*:
+## Auth: OIDC, no tokens
+
+The CLI publishes with **npm OIDC trusted publishing**. There is no
+`NPM_TOKEN` in this repo and there shouldn't be.
+
+One-time setup — npmjs.com → `@muthuishere/vsync` → *Settings* →
+*Trusted Publisher* → GitHub Actions:
 
 | Field | Value |
 |---|---|
-| Provider | GitHub Actions |
-| Organization / user | `muthuishere` |
+| Organization or user | `muthuishere` |
 | Repository | `vsync` |
 | Workflow filename | `release.yml` |
-| Environment | *(leave empty)* |
+| Environment | *leave blank* |
 
-The workflow installs `npm@latest` because OIDC trusted publishing needs npm
-CLI ≥ 11.5.1. It uses `npm publish`, **not** `bun publish` — the OIDC
-handshake lives in the npm client.
+Two things that fail confusingly if wrong: the workflow field is the bare
+filename (no `.github/workflows/` prefix), and Environment must be blank
+because the workflow declares none.
 
-### PyPI — `vsync-s3-client`
-
-pypi.org → project → *Publishing* → *Add a new publisher* → GitHub:
-
-| Field | Value |
-|---|---|
-| Owner | `muthuishere` |
-| Repository | `vsync` |
-| Workflow name | `release.yml` |
-| Environment | *(leave empty)* |
-
-### Maven Central — no OIDC
-
-Sonatype's Central Portal has **no GitHub OIDC trusted-publisher flow**, so
-Java is the one artifact that still needs secrets. The job is *gated* on them
-and skips cleanly when absent, so it never blocks the rest of the release.
-
-Repository secrets, if you want Java published from CI:
-
-- `CENTRAL_TOKEN_USERNAME` / `CENTRAL_TOKEN_PASSWORD` — Central Portal user token
-- `MAVEN_GPG_PRIVATE_KEY` — ASCII-armoured private key
-- `MAVEN_GPG_PASSPHRASE`
-
-Otherwise publish it by hand: `task java:publish`.
-
-### Go — nothing to configure
-
-There is no registry. The module is resolved from the `libraries/go/v<version>`
-tag; pushing that tag *is* the release.
+The job installs `npm@latest` because OIDC needs npm CLI ≥ 11.5.1, and uses
+`npm publish` rather than `bun publish` — the OIDC handshake lives in the npm
+client.
 
 ## Cutting a release
 
 ```bash
-# 1. bump every package to the same version, then confirm
 task check:version                 # must print ✓ all packages at <version>
-
-# 2. full local gate
 task test:all                      # CLI + Python + TS + Go + Java
-
-# 3. tag (local only — creates v<version> AND libraries/go/v<version>)
-task tag:release
-
-# 4. this is the irreversible step — it triggers the publish workflow
-git push --tags
+task tag:release                   # local only: v<version> + libraries/go/v<version>
+git push --tags                    # ← irreversible: triggers the publish
 ```
 
-Step 4 is the point of no return: npm and PyPI releases cannot be
-un-published, only deprecated or yanked. Everything before it is local and
-reversible.
+Everything before `git push --tags` is local and undoable. That last step is
+not: an npm version cannot be un-published after 72 hours, only deprecated.
 
-## Rehearsing without publishing
+## Rehearsing
 
-Actions → **Release** → *Run workflow* → leave **dry_run** checked. That runs
-the full gate plus `npm publish --dry-run` and a real PyPI build, and uploads
-nothing.
+Actions → **Release** → *Run workflow*, leave **dry_run** checked. Runs the
+version gate, the CLI suite, every library's tests, and
+`npm publish --dry-run`. Uploads nothing. Worth doing after any change to the
+workflow or to the trusted-publisher config.
 
-## What the workflow guarantees
+## Publishing a library for the first time
 
-- The tag and `package.json` version must match, or the run fails immediately.
-- `task check:version` and the whole CLI suite must pass **before** any
-  publish job starts, so a partial release across four registries is unlikely.
-- Each publish job requests `id-token: write` explicitly; the top-level
-  default is `contents: read`.
-- If the companion `libraries/go/v<version>` tag is missing, the run warns
-  rather than failing — the other artifacts are already out by then, and the
-  fix is simply pushing the tag.
+Not needed today — recorded so the trap is known when it is.
+
+**npm and Maven have no "pending publisher" concept.** A trusted publisher is
+attached to a package that already exists, so the *first* publish of
+`@muthuishere/vsync-s3-client` cannot use OIDC. Bootstrap it once by hand:
+
+```bash
+cd libraries/typescript && npm publish --access public
+```
+
+…then add the trusted publisher on the now-existing package page, and CI can
+take it from there.
+
+**PyPI is the exception** — it supports *pending publishers* at
+<https://pypi.org/manage/account/publishing/>, which reserve a name that
+doesn't exist yet and authorise its first OIDC publish. No manual bootstrap
+needed.
+
+**Maven Central has no OIDC path at all.** Sonatype's Central Portal needs a
+user token plus a GPG key. If Java ever ships, it needs
+`CENTRAL_TOKEN_USERNAME` / `CENTRAL_TOKEN_PASSWORD` / `MAVEN_GPG_PRIVATE_KEY` /
+`MAVEN_GPG_PASSPHRASE` as repository secrets, or publish by hand with
+`task java:publish`.
+
+**Go needs nothing.** Pushing `libraries/go/v<version>` is the release; the
+module proxy resolves it from the tag.
 
 ## If a release goes wrong
 
 - **npm** — `npm deprecate @muthuishere/vsync@<version> "<why>"`. Unpublishing
-  is only possible within 72 hours and is disruptive; prefer a patch release.
-- **PyPI** — yank the release in the web UI. Yanked versions stay installable
-  by exact pin but are skipped by resolvers.
-- **Go** — a tag cannot be meaningfully retracted once the proxy has cached
-  it. Publish a new patch and, if needed, add a `retract` directive to
-  `go.mod`.
-- **Maven Central** — immutable. Publish a patch.
-
-Because three of the four are effectively irreversible, the local gate exists
-to catch problems before `git push --tags`.
+  is only possible within 72 hours and breaks anyone who already installed it;
+  prefer a patch release.
+- **Go** — a tag can't be meaningfully retracted once the proxy caches it. Ship
+  a patch and add a `retract` directive to `go.mod` if needed.
+- **PyPI / Maven** — not applicable yet. PyPI supports yanking; Maven Central
+  is immutable.
