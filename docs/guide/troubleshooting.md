@@ -334,6 +334,31 @@ vsync use dev
 
 There is no `--force` flag — by design. See [Switching envs — safety](/guide/use#safety-never-clobber-a-real-file).
 
+## `repo name "profiles" is reserved`
+
+vsync keeps its own state in `<config>/profiles/` and `<config>/backups/`. A
+repo with either name would write its config *inside* one of those
+directories, colliding with vsync's own files and vanishing from
+`vsync keystore list`.
+
+Both names are refused. Pick another with `--repo=<name>`, or commit a
+`.vsync` file pinning a different identity. If you hit this after upgrading to
+0.15.0, a repo of that name was already half-broken — check
+`<config>/profiles/` for a stray `env_*` file and move it under a properly
+named directory.
+
+## `pull` fails right after a successful `rotate-passphrase`
+
+Fixed in **0.15.0**. Before that, `rotate-passphrase` re-encrypted the bundle
+under the new passphrase but never wrote it back to the OS keychain, so the
+machine that ran the rotation kept the *old* key and could no longer decrypt.
+Rotation appeared to succeed and quietly locked out the operator.
+
+If you're on an older CLI and stuck in this state: upgrade, then recover local
+access with a fresh `vsync export` / `vsync import` from a teammate who still
+has a working key — or from a `.keytree` if you made one. Teammates who never
+rotated are unaffected.
+
 ## Windows: `EPERM` when running `vsync use`
 
 Windows symlinks require either:

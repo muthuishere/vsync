@@ -31,7 +31,7 @@ import {
   type RotateAuditMock,
 } from "../bin/rotate-passphrase";
 import { saveConfigFile, type ConfigFile } from "../src/repoconfig";
-import { setKey, deleteKey, generateKey } from "../src/keychain";
+import { setKey, getKey, deleteKey, generateKey } from "../src/keychain";
 import { encrypt } from "../src/crypto";
 import { wrap, serializeManifestMeta } from "../src/manifest";
 
@@ -317,6 +317,40 @@ describe("rotate-passphrase — happy path", () => {
     expect(err).toMatch(/Bundle re-encrypted|gen=/);
     expect(err).toMatch(/Next steps|VSYNC_PASSPHRASE/);
     expect(err).toMatch(/race window|operator/i);
+  });
+
+  // Regression: rotation used to re-encrypt the bundle under the new
+  // passphrase and never write it back to the keychain. Since the keychain
+  // value IS the envelope password (bin/pull.ts → cfg.encryption.key ←
+  // getKey()), that left the operator's own machine holding a stale key —
+  // `vsync pull` would fail right after a "successful" rotation.
+  test("new passphrase is persisted to the keychain (operator is not locked out)", async () => {
+    const key = generateKey();
+    const newPassphrase = "abrandnewpassphrase";
+    await saveConfigFile(TEST_REPO, "dev", sampleConfig);
+    await setKey(TEST_REPO, "dev", key);
+
+    const s3 = await makeS3Mock({
+      oldPassphrase: key,
+      key,
+      salt: sampleConfig.encryption.salt,
+      currentTs: "20260523-100000",
+    });
+    __setS3Mock(s3);
+    __setAuditMock(makeAuditMock());
+
+    (process.stdin as any).isTTY = false;
+    try {
+      await main([
+        "--env=dev",
+        `--old-passphrase=${key}`,
+        `--new-passphrase=${newPassphrase}`,
+      ]);
+    } catch (e: any) {
+      if (!String(e.message).startsWith("__exit:0")) throw e;
+    }
+
+    expect(await getKey(TEST_REPO, "dev")).toBe(newPassphrase);
   });
 
   test("--note and --meta are merged into the rotation audit meta", async () => {

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vsync-s3-client"
-version = "0.11.0"
+version = "0.15.0"
 description = "Read-side runtime library for the vsync ecosystem — pull, decrypt, and access a vault from S3 in one round trip."
 readme = "README.md"
 requires-python = ">=3.10"

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "../src/argv";
 import { wantsHelp, printHelp } from "../src/help";
-import { getRepoName, getRepoRoot } from "../src/repo";
+import { getRepoName, getVaultRoot } from "../src/repo";
 import { loadEnvConfig, resolveVaultFolder } from "../src/envconfig";
 import { loadConfigFile, DEFAULT_AUDIT_ENABLED } from "../src/repoconfig";
 import { unzipTo } from "../src/archive";
@@ -36,18 +36,18 @@ import { backupVault } from "../src/vaultbackup";
 
 const HELP = `
 NAME
-  vsync pull — download + decrypt + unpack the latest vault folder from S3
+  vsync pull — download + decrypt + unpack a vault folder version from S3
 
 SYNOPSIS
-  vsync pull <env> [--repo=<name>] [audit flags]
+  vsync pull <env> [--at=<ts>] [--repo=<name>] [audit flags]
 
 DESCRIPTION
   Reads the per-(repo, env) config + keychain key, backs up the current
   local vault folder (encrypted with the same envelope as the S3 bundle),
-  reads the s3://<bucket>/<repo>/<env>/latest pointer, downloads the
-  matching <ts>.enc bundle, decrypts it, verifies the embedded manifest
-  timestamp matches the pointer (defeats rename-attacks), and unpacks the
-  zip into the repo root.
+  reads the s3://<bucket>/<repo>/<env>/latest pointer (or the version named
+  by --at), downloads the matching <ts>.enc bundle, decrypts it, verifies the
+  embedded manifest timestamp matches the one requested (defeats
+  rename-attacks), and unpacks the zip into the repo root.
 
   The destination is the vault folder configured at \`vsync init\` time
   (cfg.files.vaultFolder ?? infra/vault/<env>). A best-effort \`pull\` row
@@ -55,6 +55,11 @@ DESCRIPTION
   opt-out is set.
 
 FLAGS
+  --at=<ts>                pull a specific version (YYYYMMDD-HHMMSS) instead of
+                           whatever <env>/latest points at. Every push is kept
+                           on the bucket forever, so any timestamp listed by
+                           \`vsync versions <env>\` works. Read-only with
+                           respect to the remote — the pointer is NOT moved.
   --backup                 snapshot the current vault to
                            \$XDG_CONFIG_HOME/vsync/backups/<repo>/<env>.backup-<ts>/
                            before pulling. Use when local has unsynced edits
@@ -75,6 +80,10 @@ EXAMPLES
   # Daily pull
   vsync pull dev
 
+  # Time travel — inspect what prod looked like at a past version
+  vsync versions prod                       # list what's available
+  vsync pull prod --at=20260523-100000 --backup
+
   # Pull with a note recorded in the audit log
   vsync pull prod --note="picking up team-mate's secret rotation"
 
@@ -90,6 +99,23 @@ SEE ALSO
   vsync versions(1)        list versions on S3 without pulling them
   vsync use(1)              symlink ./.env to the vault's .env.<env>
 `;
+
+/**
+ * Minimal shape of what `pull` needs from an S3 client — the two reads it
+ * actually performs. Mirrors the injection seam in bin/rotate-passphrase.ts
+ * so the download → decrypt → verify → unzip path is testable without a live
+ * bucket. Production always uses the real `makeClient`.
+ */
+export type PullS3 = {
+  file(key: string): { text(): Promise<string>; bytes(): Promise<Uint8Array> };
+};
+
+let injectedS3: PullS3 | null = null;
+
+/** Test-only seam. Pass null to restore the real client. */
+export function __setS3Mock(m: PullS3 | null): void {
+  injectedS3 = m;
+}
 
 export async function main(argv: string[]): Promise<void> {
   if (wantsHelp(argv)) printHelp(HELP);
@@ -108,6 +134,20 @@ export async function main(argv: string[]): Promise<void> {
     process.exit(1);
   }
 
+  // --at=<ts> — time travel. Every push writes an immutable
+  // <prefix>versions/<ts>.enc and none are ever pruned, so any timestamp
+  // `vsync versions <env>` lists can be pulled directly. Validated against
+  // the same shape src/backup.ts::timestamp() produces so a typo fails here
+  // rather than as a confusing 404 from S3.
+  const atTs = flags.at && flags.at !== "true" ? flags.at.trim() : null;
+  if (atTs !== null && !/^\d{8}-\d{6}$/.test(atTs)) {
+    console.error(
+      `error: --at=${atTs} is not a version timestamp (expected YYYYMMDD-HHMMSS).\n` +
+        `  Run 'vsync versions ${env}' to list what's actually on the bucket.`,
+    );
+    process.exit(1);
+  }
+
   let cfg;
   try {
     cfg = await loadEnvConfig(repo, env);
@@ -118,7 +158,7 @@ export async function main(argv: string[]): Promise<void> {
   // Reload the on-disk ConfigFile to pick up `audit.enabled` (EnvConfig
   // doesn't carry it through).
   const cfgFile = await loadConfigFile(repo, env);
-  const root = await getRepoRoot();
+  const root = await getVaultRoot();
   const vaultFolder = resolveVaultFolder(cfg, env);
   const absVault = join(root, vaultFolder);
 
@@ -140,7 +180,7 @@ export async function main(argv: string[]): Promise<void> {
 
   const prefixKey = `${repo}/${env.toLowerCase()}/`;
   const pointerKey = `${prefixKey}latest`;
-  const client = makeClient(cfg.s3);
+  const client: PullS3 = injectedS3 ?? makeClient(cfg.s3);
 
   // v0.17 — --backup: snapshot current vault under XDG before pulling fresh.
   let plainBackupPath: string | null = null;
@@ -161,17 +201,52 @@ export async function main(argv: string[]): Promise<void> {
   }
 
   console.log(`[2/6] reading pointer s3://${cfg.s3.bucket}/${pointerKey}`);
-  const remoteTs = (await client.file(pointerKey).text()).trim();
-  if (!remoteTs) {
+  const pointerTs = (await client.file(pointerKey).text()).trim();
+
+  // With --at we still read the pointer, but only to tell the operator how
+  // far back they're going. An empty pointer is fatal for a normal pull and
+  // merely uninteresting for an explicit one.
+  if (!pointerTs && atTs === null) {
     console.error(
       `pointer is empty — vsync push ${env} first to seed s3://${cfg.s3.bucket}/${prefixKey}`,
     );
     process.exit(1);
   }
 
+  const remoteTs = atTs ?? pointerTs;
+  if (atTs !== null) {
+    if (atTs === pointerTs) {
+      console.log(`      --at=${atTs} is the current latest`);
+    } else {
+      console.log(`      ⚠ time travel: pulling ${atTs}, latest is ${pointerTs || "(none)"}`);
+      console.log(
+        `      This overwrites the local vault with an OLDER version. It does NOT move`,
+      );
+      console.log(
+        `      the remote pointer — but 'vsync push ${env}' afterwards would publish this`,
+      );
+      console.log(
+        `      old content as the new latest. Copy out what you need instead.`,
+      );
+    }
+  }
+
   const versionKey = `${prefixKey}versions/${remoteTs}.enc`;
   console.log(`[3/6] downloading version ${remoteTs} (${versionKey})`);
-  const encrypted = await client.file(versionKey).bytes();
+  let encrypted: Uint8Array;
+  try {
+    encrypted = await client.file(versionKey).bytes();
+  } catch (e) {
+    console.error(
+      `failed to download s3://${cfg.s3.bucket}/${versionKey}: ${(e as Error).message}`,
+    );
+    if (atTs !== null) {
+      console.error(
+        `  Version ${atTs} may not exist — run 'vsync versions ${env}' to list what does.`,
+      );
+    }
+    process.exit(1);
+  }
 
   console.log(`[4/6] decrypting`);
   let wrapped: Uint8Array;
@@ -190,7 +265,8 @@ export async function main(argv: string[]): Promise<void> {
   const { ts: embeddedTs, payload: zipBytes } = unwrap(wrapped);
   if (embeddedTs !== remoteTs) {
     console.error(
-      `pointer claims ${remoteTs} but bundle was sealed as ${embeddedTs} — refusing. Possible bucket tampering.`,
+      `${atTs !== null ? `requested version ${remoteTs}` : `pointer claims ${remoteTs}`}` +
+        ` but bundle was sealed as ${embeddedTs} — refusing. Possible bucket tampering.`,
     );
     process.exit(1);
   }

@@ -33,6 +33,7 @@ const SUBCOMMANDS = [
   "audit",
   "docs",
   "profile",
+  "keystore",
   "status",
   "runtime-token",
   "rotate-passphrase",
@@ -55,6 +56,11 @@ function usage(code = 0): never {
   out("  profile show <name>             show one profile (secret masked unless --reveal-secret)");
   out("  profile add  <name>             interactively create a new profile");
   out("  profile remove <name>           delete a profile (refuses without confirm)");
+  out("");
+  out("this machine");
+  out("  keystore list                   every (repo, env) here + whether its key is present");
+  out("  keystore export --all           seal chosen (repo,env) pairs + profiles into one .keytree");
+  out("  keystore import <file>          restore a .keytree — profiles, configs and keys, in one step");
   out("");
   out("daily");
   out("  push <env>                      encrypt + upload local vault folder to s3://<bucket>/<repo>/<env>/");
@@ -188,6 +194,11 @@ async function dispatch(): Promise<void> {
   }
   case "profile": {
     const { main } = await import("./profile");
+    await main(subArgv);
+    break;
+  }
+  case "keystore": {
+    const { main } = await import("./keystore");
     await main(subArgv);
     break;
   }

@@ -24,32 +24,6 @@ export async function zipFolder(folderPath: string): Promise<string> {
   return out;
 }
 
-// Zip a list of paths (files and/or folders) relative to baseDir into one
-// temp zip. Paths are stored at their relative locations, so unzipping back
-// at baseDir restores them exactly. Returns the zip's path.
-export async function zipPaths(
-  baseDir: string,
-  paths: string[],
-): Promise<string> {
-  if (paths.length === 0) {
-    throw new Error("zipPaths: no paths supplied");
-  }
-  const out = join(
-    tmpdir(),
-    `bundle-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`,
-  );
-  const proc = Bun.spawn(["zip", "-r", "-q", out, ...paths], {
-    cwd: baseDir,
-    stderr: "pipe",
-  });
-  const code = await proc.exited;
-  if (code !== 0) {
-    const err = await new Response(proc.stderr).text();
-    throw new Error(`zip exited ${code}: ${err.trim()}`);
-  }
-  return out;
-}
-
 // Zip a list of paths (files and/or folders) relative to baseDir into a zip
 // at outPath. Paths are stored at their relative locations, so unzipping at
 // baseDir restores them exactly.

@@ -49,11 +49,85 @@ export type ConfigFile = {
 /** Per-(repo, env) audit preference, defaulted. Source of truth for callers. */
 export const DEFAULT_AUDIT_ENABLED = true;
 
+/**
+ * Directory names that already exist as siblings of the per-repo dirs under
+ * `vsyncBaseDir()`. A repo with one of these names would write its config
+ * *inside* that directory — `<base>/profiles/env_dev` landing next to
+ * `<base>/profiles/myprofile.json` — silently colliding with vsync's own
+ * state and disappearing from `vsync keystore list`.
+ *
+ * Refuse the name rather than corrupt the layout.
+ */
+const RESERVED_REPO_NAMES = new Set(["profiles", "backups"]);
+
+/** Throws if `repo` would collide with vsync's own directories. */
+export function assertUsableRepoName(repo: string): void {
+  if (RESERVED_REPO_NAMES.has(repo.toLowerCase())) {
+    throw new Error(
+      `repo name "${repo}" is reserved — vsync stores its own ${repo.toLowerCase()} there.\n` +
+        `  Pass a different name with --repo=<name>, or set one in the committed .vsync file.`,
+    );
+  }
+}
+
 /** Full path for a given (repo, env). env is lowercased; repo is taken as-is. */
 export function configFilePath(repo: string, env: string): string {
   if (!repo) throw new Error("repo is required");
   if (!env) throw new Error("env is required");
+  assertUsableRepoName(repo);
   return path.join(vsyncBaseDir(), repo, `env_${env.toLowerCase()}`);
+}
+
+/**
+ * Every (repo, env) pair this machine knows about, sorted.
+ *
+ * The config tree IS the index: `Bun.secrets` exposes only get/set/delete
+ * with no enumeration, so the keychain cannot be listed directly. Walking
+ * `<base>/<repo>/env_<env>` is the only way to discover what exists — which
+ * is why `vsync status` already does the per-repo version of this walk.
+ *
+ * Presence of a config file does NOT imply the keychain still holds the
+ * matching key; callers that care must probe with `getKey()`. That gap is
+ * exactly what an orphan check would report.
+ */
+export async function listAllPairs(): Promise<
+  Array<{ repo: string; env: string }>
+> {
+  const base = vsyncBaseDir();
+  let repoDirs: import("node:fs").Dirent[];
+  try {
+    repoDirs = await fs.readdir(base, { withFileTypes: true });
+  } catch (err: any) {
+    if (err && (err.code === "ENOENT" || err.code === "ENOTDIR")) return [];
+    throw err;
+  }
+
+  // The profiles directory is a sibling of the repo dirs. Compare it by
+  // resolved PATH, not by name: skipping any dir literally called "profiles"
+  // would make a repo of that name silently invisible to list and export.
+  const { getProfilesDir } = await import("./profiles");
+  const profilesDir = getProfilesDir();
+
+  const out: Array<{ repo: string; env: string }> = [];
+  for (const d of repoDirs) {
+    // Plain files (e.g. the legacy defaults file) aren't repos either.
+    if (!d.isDirectory()) continue;
+    if (path.resolve(base, d.name) === path.resolve(profilesDir)) continue;
+    let entries: string[];
+    try {
+      entries = await fs.readdir(path.join(base, d.name));
+    } catch {
+      continue; // unreadable dir — skip rather than fail the whole listing
+    }
+    for (const f of entries) {
+      if (!f.startsWith("env_")) continue;
+      const env = f.slice(4);
+      if (!/^[a-z0-9._-]+$/i.test(env)) continue;
+      out.push({ repo: d.name, env });
+    }
+  }
+  out.sort((a, b) => a.repo.localeCompare(b.repo) || a.env.localeCompare(b.env));
+  return out;
 }
 
 /**

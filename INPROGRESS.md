@@ -14,7 +14,8 @@ Last updated: 2026-05-25.
 | **v0.16** (git-only identity + `.vsync`) | ✅ | ✅ | n/a | ✅ done | ❌ pending | ❌ pending |
 | **v0.17** (ledger + refuse-on-divergence) | ✅ | ✅ | n/a | ⚠️ partial | ❌ pending | ❌ pending |
 
-All 751 tests pass on `main` after the v0.16 + v0.17 implementation lands.
+The full suite passes on `main` after the v0.16 + v0.17 implementation lands.
+(Run `bun test` for the current count — a hardcoded number here rots.)
 
 ---
 

@@ -68,15 +68,59 @@ Zip the resolved vault folder → manifest-seal → AES-256-GCM encrypt → uplo
 
 ### `pull <env>`
 
-Read `latest` pointer → download version → verify embedded manifest timestamp matches pointer (anti-rollback) → decrypt → unzip into the resolved vault folder. Auto-backs up existing contents first.
+Read `latest` pointer → download version → verify embedded manifest timestamp matches what was requested (anti-rollback) → decrypt → unzip into the resolved vault folder. Auto-backs up existing contents first.
 
 ```
---no-audit  --note=<text>  --meta key=value
+--at=<ts>  --backup  --force  --no-audit  --note=<text>  --meta key=value
 ```
+
+`--at=<ts>` pulls a **specific version** (`YYYYMMDD-HHMMSS`) instead of whatever `latest` points at — every push is kept on the bucket forever, so any timestamp `vsync versions` lists works. It never moves the remote pointer.
+
+::: warning
+Pulling an old version and then running `vsync push` republishes that old content as the new latest. If you only want to read a past value, copy it out and then `vsync pull <env>` to return to current.
+:::
+
+`--backup` snapshots the current vault before overwriting; `--force` discards local edits without a snapshot. They're mutually exclusive.
 
 ### `versions <env>`
 
 List `s3://<bucket>/<repo>/<env>/versions/`. One line per version with size + age. `*` marker on the active one. Read-only; no decrypt.
+
+### `rotate-passphrase --env=<env>`
+
+Re-encrypt the bundle under a new passphrase, swap the `latest` pointer atomically (ETag-conditional), bump the `gen` counter, update this machine's keychain, and append a `rotate` audit row.
+
+```
+--new-passphrase=<pp>  --interactive  --no-audit  --note=<text>
+```
+
+This is also how offboarding works — it invalidates every previously issued `.share` for future pulls. See the [rotation runbook](/guide/rotate-passphrase-runbook).
+
+## this machine
+
+### `keystore list`
+
+Every `(repo, env)` pair on this machine and whether its OS-keychain key is present. Machine-wide, unlike `status` which is per-repo.
+
+### `keystore export`
+
+Seal a chosen subset of pairs — configs, keys, and optionally profiles — into one passphrase-encrypted `.keytree` file.
+
+```
+--all  --repo=<name>...  --env=<name>...  --profiles  --out=<path>  --passphrase=<pp>
+```
+
+Selection is **mandatory**: `--all`, or at least one `--repo` / `--env`. `--all` includes every named profile too.
+
+### `keystore import <file>`
+
+Restore a `.keytree`: profiles first, then configs and keychain keys. Existing pairs are skipped unless `--force`.
+
+```
+--passphrase=<pp>  --force
+```
+
+Full guide: [This machine — `vsync keystore`](/guide/keystore).
 
 ## external fanout
 

@@ -34,7 +34,7 @@ import {
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { parseArgs } from "../src/argv";
 import { wantsHelp, printHelp } from "../src/help";
-import { getRepoName, getRepoRoot } from "../src/repo";
+import { getRepoName, getRepoRoot, getVaultRoot } from "../src/repo";
 import { loadConfigFile } from "../src/repoconfig";
 
 const HELP = `
@@ -94,7 +94,15 @@ export async function main(argv: string[]): Promise<void> {
   if (wantsHelp(argv)) printHelp(HELP);
   const { positional, flags } = parseArgs(argv);
   const env = positional[0];
+  // Two different roots on purpose:
+  //   `root`      — THIS worktree's toplevel. The symlink lands here, because
+  //                 the app that reads .env runs in this checkout.
+  //   `vaultRoot` — where the vault actually lives. Same as `root` in the main
+  //                 worktree; the main worktree's toplevel when we're in a
+  //                 linked one, so every worktree points at one shared vault
+  //                 instead of each needing its own `vsync pull`.
   const root = await getRepoRoot();
+  const vaultRoot = await getVaultRoot();
   // All link paths resolve against the repo root — matches every other
   // vsync verb (push, pull, sync, audit). So `vsync use dev --link=.env.dev`
   // lands the symlink at <repoRoot>/.env.dev regardless of cwd.
@@ -132,7 +140,7 @@ export async function main(argv: string[]): Promise<void> {
 
   const vaultFolder =
     cfg.files?.vaultFolder ?? `infra/vault/${env.toLowerCase()}`;
-  const target = join(root, vaultFolder, `.env.${env}`);
+  const target = join(vaultRoot, vaultFolder, `.env.${env}`);
   if (!existsSync(target)) {
     console.error(
       `expected ${target} to exist — run 'vsync pull ${env}' first.`,

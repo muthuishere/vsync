@@ -13,7 +13,7 @@ version: '3'
 #   task publish:all     # publish CLI + Python + TS + tag Go (in order)
 
 vars:
-  VERSION: "0.11.0"
+  VERSION: "0.15.0"
 
 includes:
   python:

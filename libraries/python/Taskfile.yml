@@ -8,7 +8,7 @@ version: '3'
 # Auth for publish: set UV_PUBLISH_TOKEN env var (PyPI API token) before running `task publish`.
 
 vars:
-  VERSION: "0.11.0"
+  VERSION: "0.15.0"
   PACKAGE: "vsync-s3-client"
 
 tasks:

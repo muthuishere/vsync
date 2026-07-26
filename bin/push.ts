@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "../src/argv";
 import { wantsHelp, printHelp } from "../src/help";
-import { getRepoName, getRepoRoot } from "../src/repo";
+import { getRepoName, getVaultRoot } from "../src/repo";
 import { loadEnvConfig, resolveVaultFolder } from "../src/envconfig";
 import { loadConfigFile, DEFAULT_AUDIT_ENABLED } from "../src/repoconfig";
 import { zipPaths } from "../src/archive";
@@ -108,7 +108,7 @@ export async function main(argv: string[]): Promise<void> {
   // Reload the on-disk ConfigFile to pick up `audit.enabled` (EnvConfig
   // doesn't carry it through).
   const cfgFile = await loadConfigFile(repo, env);
-  const root = await getRepoRoot();
+  const root = await getVaultRoot();
 
   const vaultFolder = resolveVaultFolder(cfg, env);
   const absVault = join(root, vaultFolder);

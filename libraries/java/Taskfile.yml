@@ -17,7 +17,7 @@ version: '3'
 #   - Run `task publish` (activates the `release` profile in pom.xml).
 
 vars:
-  VERSION: "0.11.0"
+  VERSION: "0.15.0"
   COORDINATE: "io.github.muthuishere:vsync-s3-client"
 
 tasks:

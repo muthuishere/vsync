@@ -14,6 +14,7 @@
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { vsyncBaseDir } from "./defaults";
+import { assertUsableRepoName } from "./repoconfig";
 import { walkVault, type VaultEntry } from "./vaultwalk";
 
 export interface LedgerFileEntry {
@@ -35,6 +36,10 @@ export interface Ledger {
 }
 
 export function ledgerPath(repo: string, env: string): string {
+  // Same reserved-name collision as configFilePath — the ledger lives in the
+  // per-repo dir too, so `profiles`/`backups` would land it inside vsync's
+  // own state directories.
+  assertUsableRepoName(repo);
   return join(vsyncBaseDir(), repo, `env_${env}.ledger.json`);
 }
 

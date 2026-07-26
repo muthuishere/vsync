@@ -2,6 +2,9 @@
 
 | Release | What's in it |
 |---|---|
+| **0.15.0** | **First unified release** — CLI, Python, TypeScript, Java and Go now all carry the same version (the CLI had drifted to 0.14.0 while the libraries sat at 0.11.0). New: (1) [`vsync keystore`](/guide/keystore) — `list` every `(repo, env)` on the machine, `export` a chosen subset of configs + keys + profiles into one passphrase-sealed `.keytree`, `import` it on another machine in a single step. Selection is mandatory; new `VKT1` format, purely additive. (2) `vsync pull --at=<ts>` — [time travel](/guide/daily#time-travel) to any retained version; read-only against the remote, manifest seal still enforced. (3) An [agent skill](/guide/agent-skill) for LLM assistants. **Two behaviour changes worth reading:** git worktrees now [share the main worktree's vault](/guide/use#git-worktrees) instead of each needing their own `pull`; and `profiles` / `backups` are now refused as repo names because they collided with vsync's own directories (a latent bug since 0.13). **Bug fix:** `vsync rotate-passphrase` never wrote the new passphrase back to the OS keychain, so rotation silently locked the operator out of their own vault — the next `pull` failed to decrypt. Wire format unchanged. |
+| 0.14.0 | `vsync profiles` (plural) aliases `vsync profile`, and a bare `vsync profile` / `vsync profiles` defaults to `list`. |
+| 0.13.0 | `vsync docs` reframed as a CLI capability guide rather than a committable repo artifact. New `vsync docs <topic>` — offline provider runbooks (`aws` / `gcp` / `custom`) plus an agent workflow map (`agent`) and `list`. Adds `vsync --version` / `-v` / `version`. Docs site gains the onboarding handbook pages. Packaging: dropped a stale `skills` entry from `files` that caused a `bun install` warning. |
 | **0.12.0** | **Breaking on the CLI surface.** (1) Git is now a precondition — every subcommand errors outside a git tree. (2) `SECRETS_SYNC_REPO` env var is gone; `--repo=<name>` is the only override. (3) New committed `.vsync` identity pin file at the git toplevel, written by `init` / `import` ([v0.16 spec](/specs/v0.16-repo-identity-git-only)). (4) `vsync pull` now refuses on unsynced local edits — `--backup` snapshots vault to `$XDG_CONFIG_HOME/vsync/backups/<repo>/<env>.backup-<ts>/`, `--force` discards without backup. (5) `vsync push` refuses when remote has advanced since your last sync; `--force` overrides ([v0.17 spec](/specs/v0.17-pull-safety)). (6) Symlinks in vault folder are no longer allowed (vault is plain data). (7) New typed errors render cleanly without stack traces: `NotInGitRepoError`, `RepoIdentityUnresolvedError`, `VsyncFileMalformedError`, `VsyncFileClobberError`, `ShareRepoMismatchError`, `LocalDirtyError`, `RemoteAheadError`, `LedgerMalformedError`, `SymlinkInVaultError`. (8) `vsync status` adds a prefix block: `Repo` / `Source` (`flag` / `file` / `auto`) / `Toplevel` / `Origin` / optional worktree info. **Wire format unchanged** — bundles produced by 0.12.0 are still readable by 0.11.0 clients, but 0.11.0 push/pull won't surface the new safety errors. Runtime libraries stay at 0.11.0 for this release; they catch up to 0.12.0 when v0.15 lands. |
 | 0.8.0 | Three new `vsync sync` targets: `aws` (AWS Secrets Manager), `azure` (Azure Key Vault), `vault` (HashiCorp Vault KV v2). Dispatcher rewritten around a `TargetHandler` registry — `gh` / `gcp` move into the registry unchanged, three new handlers land alongside. **Purely additive — every 0.7.x invocation works byte-for-byte in 0.8.0.** New flags per target: `--aws-region`, `--aws-secret-prefix`, `--azure-vault`, `--vault-addr`, `--vault-mount`, `--vault-path` (persisted to `cfg.sync.<target>` on first use). gh / gcp / aws / azure share the 6-worker pool; `vault` writes the whole map in **one atomic `vault kv put`** since KV v2 is path-atomic. Wire format / audit log / parser policy / share-file format unchanged. See [v0.8 spec](/specs/v0.8-multi-target-sync) for the rationale and per-backend details. |
 | 0.7.1 | `vsync sync <env> all` removed. Only `gh` and `gcp` remained as 0.7 targets; one target per invocation. (Joined by `aws`, `azure`, `vault` in 0.8 — the one-target-per-invocation rule still applies.) Same no-magic theme as v0.7's parser refactor — the operator names what runs. CLI rejects `all` as an unknown target. |
@@ -10,6 +13,20 @@
 | 0.5.0 | `vsync use <env>` — symlinks `./.env` (or `--link=<path>`) at the vault's env file so `dotenv.config()` just works; switch envs with one command. README rewrite + flow diagram. |
 | 0.4.0 | Append-only audit log at `s3://<bucket>/<repo>/<env>/audit.csv` + `vsync audit` viewer. Expandable `meta` JSON cell via `--note` / `--meta` + matching env vars. |
 | 0.3.0 | Opinionated layout: vault folder at `infra/vault/<env>/` with `--vault-folder` override; self-contained per-(repo, env) config; `vsync sync` for GitHub / GCP fanout. |
+
+## Unified versioning
+
+From **0.15.0** the CLI and all four runtime libraries share a single version
+number, enforced by `task check:version` before any release can be tagged.
+A given version means the same wire contract everywhere.
+
+Before 0.15.0 they drifted — the CLI reached 0.14.0 while the libraries stayed
+at 0.11.0. If you have a library pinned below 0.15.0, it is not broken; it
+simply predates the unified scheme.
+
+Note that **spec numbers are not release numbers.** `docs/specs/v0.15-*.md`
+describes the runtime-library redesign, which is unrelated to the 0.15.0
+release. Specs are numbered in their own sequence.
 
 All 0.x releases are wire-compatible with each other on the S3 bundle envelope (`RQE1`) and manifest seal (`RQEM0001`). New clients tolerate the absence of features added in later versions; old clients ignore new objects (like `audit.csv`) on the bucket.
 

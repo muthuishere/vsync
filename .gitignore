@@ -13,3 +13,6 @@ docs/.vitepress/cache/
 envconfig.*.json
 !envconfig.sample.json
 infra/vault/
+
+# macOS Finder metadata — never useful in the repo.
+.DS_Store

@@ -8,7 +8,7 @@ version: '3'
 # module under `github.com/muthuishere/vsync/libraries/go`.
 
 vars:
-  VERSION: "0.11.0"
+  VERSION: "0.15.0"
   MODULE: "github.com/muthuishere/vsync/libraries/go"
   TAG: "libraries/go/v{{.VERSION}}"
 

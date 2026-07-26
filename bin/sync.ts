@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { parseArgs } from "../src/argv";
 import { wantsHelp, printHelp } from "../src/help";
 import { parseEnvFile } from "../src/envfile";
-import { getRepoName, getRepoRoot } from "../src/repo";
+import { getRepoName, getVaultRoot } from "../src/repo";
 import { loadConfigFile, saveConfigFile } from "../src/repoconfig";
 import { resolveVaultFolder } from "../src/envconfig";
 import { HANDLERS, type TargetName } from "../src/synctargets";
@@ -109,7 +109,7 @@ export async function main(argv: string[]): Promise<void> {
   const excludeProperties = lists["exclude-property"] ?? [];
 
   const repo = await getRepoName({ override: flags.repo });
-  const root = await getRepoRoot();
+  const root = await getVaultRoot();
 
   const cfg = await loadConfigFile(repo, env);
   if (!cfg) {

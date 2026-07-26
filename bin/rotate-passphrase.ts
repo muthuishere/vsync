@@ -16,7 +16,9 @@
 //   1 — wrong old passphrase / mismatched new / missing input
 //   2 — S3 error during bundle re-upload (step 3)
 //   3 — manifest swap failed — 412 conflict or other (step 4)
-//   4 — rotation succeeded but audit append failed (step 5) — manual row printed
+//   4 — rotation succeeded on S3 but a post-commit local step failed:
+//       keychain write (step 4a-bis) or audit append (step 5) — recovery
+//       instructions / manual row printed
 //   5 — per-(repo, env) config file missing
 //
 // `--old-passphrase=<value>` is exposed only for automation/tests — the
@@ -28,7 +30,7 @@ import { wantsHelp, printHelp } from "../src/help";
 import { getRepoName } from "../src/repo";
 import { loadConfigFile, configFilePath, DEFAULT_AUDIT_ENABLED } from "../src/repoconfig";
 import { ConfigFileMissingError, KeyMissingError } from "../src/envconfig";
-import { getKey } from "../src/keychain";
+import { getKey, setKey } from "../src/keychain";
 import { encrypt, decrypt } from "../src/crypto";
 import {
   wrap,
@@ -273,6 +275,31 @@ export async function main(argv: string[]): Promise<void> {
       );
     }
     process.exit(3);
+  }
+
+  // Step 4a-bis — persist the new passphrase to the OS keychain.
+  //
+  // The keychain value IS the bundle envelope password (see the comment at
+  // step 0, and `bin/pull.ts` → `cfg.encryption.key` ← `getKey()`), so the
+  // pointer swap above has just made every local keychain holding the OLD
+  // passphrase stale — including this machine's. Without this write,
+  // rotation locks the operator out of their own vault: the next `vsync
+  // pull` decrypts the new bundle with the old key and fails.
+  //
+  // Placed immediately AFTER the pointer swap on purpose. The swap is the
+  // commit point: before it, the live bundle is still the old one and the
+  // old key is still correct; after it, the new key is correct regardless
+  // of whether the later meta/audit steps succeed.
+  try {
+    await setKey(repo, env, newPassphrase);
+  } catch (e) {
+    console.error(
+      `rotation succeeded on S3 but writing the new passphrase to the OS keychain failed: ${(e as Error).message}\n` +
+        `  The vault is now sealed with the NEW passphrase, but this machine still holds the old one.\n` +
+        `  'vsync pull ${env}' will fail until the keychain is updated — re-run 'vsync import ${env} <share-file>'\n` +
+        `  or 'vsync init ${env}' to restore local access. Teammates are unaffected.`,
+    );
+    process.exit(4);
   }
 
   // Step 4b — write new manifest meta cell

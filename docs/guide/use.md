@@ -47,6 +47,30 @@ An existing **symlink** at the link path is replaced silently — symlinks are c
 
 It recognises `.env`, `.env*`, `.env.*`, `*.env`, and exact basename matches.
 
+## Git worktrees
+
+Worktrees **share the main worktree's vault**. There is no separate vault per
+branch and no per-worktree `pull` — `push`, `pull` and `sync` all resolve the
+vault against the main worktree automatically, and `vsync use <env>` drops the
+symlink in *your* worktree pointing at that shared vault.
+
+```bash
+# once, in the main checkout
+vsync pull dev
+
+# then in each worktree
+cd ../feature-branch
+vsync use dev          # ./.env -> <main worktree>/infra/vault/dev/.env.dev
+```
+
+This is deliberate: **secrets are application state, not branch state.** A
+vault per worktree would mean N decrypted copies of the same secrets drifting
+apart on disk, and N pulls to keep them current. One vault per checkout is
+both fewer copies and fewer surprises.
+
+`vsync status` shows worktree information when you're in a linked one, so you
+can confirm which toplevel the vault is resolving against.
+
 ## Platform support
 
 - **macOS / Linux / WSL** — POSIX symlinks. Works out of the box.

@@ -78,6 +78,32 @@ See [Switching envs](/guide/use).
 
 Before each `pull`, vsync writes the existing vault folder to `~/.config/vsync/backups/<env>-<ts>.zip.enc` (two-deep rolling buffer). The format is AES-256-GCM with the same per-(repo, env) keychain key + salt.
 
+## Time travel
+
+Every push writes an immutable `versions/<ts>.enc` and **none are ever
+pruned**, so any version `vsync versions` lists can be pulled back:
+
+```bash
+vsync versions prod                            # find the timestamp
+vsync pull prod --at=20260523-100000 --backup  # retrieve it
+```
+
+`--at` is read-only against the remote — the `latest` pointer is never moved,
+and the manifest seal is still verified, so a version renamed on the bucket is
+still refused.
+
+::: warning The one footgun
+`--at` overwrites your **local** vault with older content. If you then run
+`vsync push`, that old content becomes the new latest — a silent revert. To
+just look at a past value, copy it out and then `vsync pull prod` to return to
+current.
+:::
+
+Pair `--at` with `--backup` so your current vault is snapshotted before it's
+replaced.
+
+## Decrypting a bundle by hand
+
 To decrypt one by hand (rare — `pull` itself is the recovery path 99% of the time):
 
 1. Get the key:

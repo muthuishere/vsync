@@ -45,6 +45,29 @@ export async function getRepoRoot(): Promise<string> {
 }
 
 /**
+ * Filesystem path the **vault folder** resolves against.
+ *
+ * Identical to `getRepoRoot()` in the main worktree. In a *linked* worktree
+ * it returns the main worktree's toplevel instead, so every worktree shares
+ * one vault rather than each maintaining its own copy.
+ *
+ * Rationale: the vault is machine state, not branch state. Resolving it
+ * per-worktree meant `vsync pull` had to run once per worktree, producing N
+ * independently-drifting plaintext copies of the same secrets — more disk
+ * exposure and more ways to be out of date. One vault per checkout, shared
+ * by every worktree, is both fewer copies and fewer surprises.
+ *
+ * Note this is deliberately NOT used for the committed `.vsync` identity pin
+ * — that's a tracked file and belongs at the current worktree's toplevel,
+ * where git expects it.
+ */
+export async function getVaultRoot(): Promise<string> {
+  const toplevel = await getRepoRoot();
+  const worktree = await detectWorktree(toplevel);
+  return worktree ? worktree.mainToplevel : toplevel;
+}
+
+/**
  * Best-effort variant — returns null instead of throwing when not in a
  * git tree. Used by `vsync status` so it can still render a useful
  * "not in a git repo" message instead of erroring out.
