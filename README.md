@@ -1,4 +1,5 @@
 # vsync
+[![Discord](https://img.shields.io/badge/AgentNexus-join%20the%20community-5865F2?logo=discord&logoColor=white)](https://discord.gg/V9C2kvHC8D)
 
 **An encrypted vault for your environment secrets — shared across your team, mirrored to GitHub / GCP / AWS / Azure / HashiCorp Vault, audited every time someone touches it.**
 
@@ -122,6 +123,11 @@ Current CLI release: **`0.14.0`**. Runtime libraries are at `0.11.0` and will ca
 [Full changelog →](https://muthuishere.github.io/vsync/guide/versioning)
 
 ---
+
+## Community
+
+Questions, ideas, or built something with this? Join **[AgentNexus](https://discord.gg/V9C2kvHC8D)** — a Discord
+for people building with AI agents and open tools. This project lives in **#other-tools**.
 
 ## License
 
